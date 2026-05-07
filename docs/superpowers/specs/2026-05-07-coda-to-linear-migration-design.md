@@ -84,7 +84,7 @@ Append row to report.csv; write success entry to state.json.
 
 ## Page hierarchy
 
-Linear documents do not nest. Coda sub-pages flatten to sibling documents within the same project. To preserve visual hierarchy, page titles are prefixed with the parent chain: `"Onboarding / Day 1 / Setup"`. The migration maps each Coda page to one Linear document — sub-pages are independent rows in `mapping.yaml` and can target different Linear projects if desired.
+Linear documents do not nest. Each Coda page — parent or sub-page — becomes one Linear document, and each appears as its own row in `mapping.yaml`. Default behavior: a sub-page inherits its parent's `linear_project_id` when the user fills in the parent's row, so a whole Coda page tree lands as siblings in one Linear project. The user can override per-row if a sub-page belongs to a different project. To preserve visual hierarchy in the flattened layout, page titles are prefixed with the parent chain: `"Onboarding / Day 1 / Setup"`.
 
 ## Asset handling
 
