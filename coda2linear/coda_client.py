@@ -68,6 +68,8 @@ class CodaClient:
             if page_token:
                 params["pageToken"] = page_token
             data = self._get(f"/docs/{doc_id}/pages/{page_id}/content", params)
+            if "output" in data:
+                chunks.append(data["output"])
             for item in data.get("items", []):
                 if isinstance(item, dict) and "text" in item:
                     chunks.append(item["text"])

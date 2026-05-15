@@ -16,8 +16,6 @@ REPORT_HEADERS = [
     "error_message",
 ]
 
-_EMPTY_STATE: dict = {"pages": {}, "uploaded_assets": {}}
-
 
 def load_state(path: str) -> dict:
     """Load state.json; return empty state structure if file doesn't exist."""
