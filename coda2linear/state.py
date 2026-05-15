@@ -21,8 +21,17 @@ def load_state(path: str) -> dict:
     """Load state.json; return empty state structure if file doesn't exist."""
     if not os.path.exists(path):
         return {"pages": {}, "uploaded_assets": {}}
-    with open(path) as f:
-        return json.load(f)
+    try:
+        with open(path, encoding="utf-8") as f:
+            state = json.load(f)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            f"{path} is not valid JSON. Move or delete it, then rerun migrate "
+            "to start with a fresh migration state."
+        ) from exc
+    state.setdefault("pages", {})
+    state.setdefault("uploaded_assets", {})
+    return state
 
 
 def save_state(path: str, state: dict) -> None:
