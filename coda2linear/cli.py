@@ -1,4 +1,5 @@
 import argparse
+import csv
 import logging
 import os
 import sys
@@ -339,13 +340,12 @@ def cmd_verify(args: argparse.Namespace) -> None:
     if not os.path.exists(args.report):
         sys.exit(f"Error: {args.report} not found — run 'coda2linear migrate' first")
 
-    import csv as _csv
     with open(args.report, newline="", encoding="utf-8") as f:
-        reader = _csv.DictReader(f)
+        reader = csv.DictReader(f)
         rows = [r for r in reader if r.get("status") == "success"]
 
     if not rows:
-        print("No successfully migrated documents found in report.csv. Nothing to verify.")
+        print(f"No successfully migrated documents found in {args.report}. Nothing to verify.")
         return
 
     print(f"Verifying {len(rows)} document(s)...")
