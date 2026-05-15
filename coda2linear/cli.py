@@ -146,6 +146,185 @@ def _upload_asset(
     return new_url, True
 
 
+def _migrate_one_page(
+    entry: dict,
+    state: dict,
+    coda: CodaClient,
+    linear: LinearClient,
+    dry_run: bool,
+) -> dict:
+    """Migrate one Coda page to a Linear project document.
+
+    Returns a report row dict.
+    """
+    page_id = entry["coda_page_id"]
+    doc_id = entry["coda_doc_id"]
+    project_id = entry["linear_project_id"]
+
+    # fetch Markdown
+    markdown = coda.get_page_content_markdown(doc_id, page_id)
+
+    # extract all asset URLs
+    urls = extract_asset_urls(markdown)
+
+    url_map: dict[str, str] = {}
+    callout_lines: list[str] = []
+    images_migrated = 0
+    images_skipped = 0
+
+    for url in urls:
+        if not should_rehost(url):
+            continue
+
+        # use cached result if available
+        if url in state["uploaded_assets"]:
+            url_map[url] = state["uploaded_assets"][url]
+            images_migrated += 1
+            continue
+
+        # download asset (with one retry on signed-URL expiry)
+        for attempt in range(2):
+            try:
+                asset_bytes, content_type, filename = coda.download_asset(url)
+                break
+            except PermissionError:
+                if attempt == 0:
+                    log.info("Signed URL expired; re-fetching page Markdown for %s", page_id)
+                    markdown = coda.get_page_content_markdown(doc_id, page_id)
+                else:
+                    raise
+        else:
+            raise RuntimeError(f"Could not download asset after retry: {url}")
+
+        size = len(asset_bytes)
+        is_oversized = size > MAX_ASSET_BYTES
+
+        if is_oversized:
+            callout_lines.append(oversized_asset_callout(url))
+            images_skipped += 1
+            continue
+
+        # upload
+        new_url, rehosted = _upload_asset(
+            url, asset_bytes, content_type, filename, linear, state, dry_run
+        )
+
+        if new_url is None:
+            callout_lines.append(oversized_asset_callout(url))
+            images_skipped += 1
+        elif new_url == _DRY_RUN_URL:
+            images_migrated += 1
+        else:
+            url_map[url] = new_url
+            images_migrated += 1
+
+    # rewrite Markdown and append callouts
+    final_markdown = rewrite_asset_urls(markdown, url_map)
+    for callout in callout_lines:
+        final_markdown += callout
+
+    title = build_title(entry["coda_page_name"], entry.get("coda_parent_names", []))
+
+    if dry_run:
+        print(
+            f"  [DRY RUN] '{title}' → project {project_id} "
+            f"({images_migrated} assets, {images_skipped} skipped)"
+        )
+        return {
+            "coda_doc_id": entry["coda_doc_id"],
+            "coda_page_id": page_id,
+            "coda_page_name": entry["coda_page_name"],
+            "linear_project_id": project_id,
+            "status": "dry_run",
+            "images_migrated": images_migrated,
+            "images_skipped": images_skipped,
+        }
+
+    doc = linear.document_create(title, final_markdown, project_id)
+    print(f"  ✓ '{title}' → {doc['url']}")
+    return {
+        "coda_doc_id": entry["coda_doc_id"],
+        "coda_page_id": page_id,
+        "coda_page_name": entry["coda_page_name"],
+        "linear_project_id": project_id,
+        "linear_document_id": doc["id"],
+        "linear_document_url": doc["url"],
+        "status": "success",
+        "images_migrated": images_migrated,
+        "images_skipped": images_skipped,
+    }
+
+
+def cmd_migrate(args: argparse.Namespace) -> None:
+    coda_token = os.environ.get("CODA_API_TOKEN")
+    linear_token = os.environ.get("LINEAR_API_TOKEN")
+    if not coda_token:
+        sys.exit("Error: CODA_API_TOKEN not set")
+    if not linear_token:
+        sys.exit("Error: LINEAR_API_TOKEN not set")
+
+    if not os.path.exists(args.mapping):
+        sys.exit(f"Error: {args.mapping} not found — run 'coda2linear discover' first")
+
+    with open(args.mapping, encoding="utf-8") as f:
+        mapping_data = yaml.safe_load(f)
+    all_entries: list[dict] = mapping_data.get("pages", [])
+    entries = [e for e in all_entries if e.get("linear_project_id")]
+
+    if not entries:
+        sys.exit(f"No entries with linear_project_id set in {args.mapping}. Nothing to do.")
+
+    print(f"Found {len(entries)} page(s) to migrate (of {len(all_entries)} total in mapping).")
+    if args.dry_run:
+        print("DRY RUN — no writes to Linear.")
+
+    with httpx.Client(follow_redirects=True, timeout=60) as http:
+        coda = CodaClient(coda_token, http)
+        linear = LinearClient(linear_token, http)
+
+        _preflight(coda, linear, entries)
+
+        state = load_state(args.state_file)
+        succeeded = failed = skipped = 0
+
+        for i, entry in enumerate(entries, 1):
+            page_id = entry["coda_page_id"]
+            page_status = state["pages"].get(page_id, {}).get("status", "")
+
+            if page_status == "success":
+                print(f"  [{i}/{len(entries)}] Skipping (already migrated): {entry['coda_page_name']}")
+                skipped += 1
+                continue
+
+            print(f"  [{i}/{len(entries)}] Migrating: {entry['coda_page_name']}")
+            try:
+                result = _migrate_one_page(entry, state, coda, linear, args.dry_run)
+                state["pages"][page_id] = {
+                    "status": result["status"],
+                    "linear_document_id": result.get("linear_document_id", ""),
+                    "linear_document_url": result.get("linear_document_url", ""),
+                }
+                save_state(args.state_file, state)
+                append_report_row(args.report, result)
+                succeeded += 1
+            except Exception as exc:
+                reason = str(exc)
+                log.error("Failed to migrate '%s': %s", entry["coda_page_name"], reason)
+                state["pages"][page_id] = {"status": f"failed:{reason[:120]}"}
+                save_state(args.state_file, state)
+                append_report_row(args.report, {
+                    **entry,
+                    "status": "failed",
+                    "error_message": reason[:200],
+                })
+                failed += 1
+
+    print(f"\nDone. {succeeded} migrated, {skipped} skipped, {failed} failed.")
+    if failed:
+        print(f"Check {args.report} for details. Re-run migrate to retry failed pages.")
+        sys.exit(1)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="coda2linear",
@@ -179,8 +358,7 @@ def main() -> None:
     if args.command == "discover":
         cmd_discover(args)
     elif args.command == "migrate":
-        print("Error: migrate not yet implemented", file=sys.stderr)
-        sys.exit(1)
+        cmd_migrate(args)
     elif args.command == "verify":
         print("Error: verify not yet implemented", file=sys.stderr)
         sys.exit(1)
