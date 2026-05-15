@@ -50,8 +50,29 @@ class LinearClient:
 
     def get_projects(self) -> list[dict]:
         """Return all accessible projects: [{id, name}]."""
-        data = self._gql("query { projects { nodes { id name } } }")
-        return data["projects"]["nodes"]
+        nodes: list[dict] = []
+        cursor: str | None = None
+        while True:
+            variables: dict = {"first": 250}
+            if cursor:
+                variables["after"] = cursor
+            data = self._gql(
+                """
+                query Projects($first: Int!, $after: String) {
+                  projects(first: $first, after: $after) {
+                    nodes { id name }
+                    pageInfo { hasNextPage endCursor }
+                  }
+                }
+                """,
+                variables,
+            )
+            page = data["projects"]
+            nodes.extend(page["nodes"])
+            if not page["pageInfo"]["hasNextPage"]:
+                break
+            cursor = page["pageInfo"]["endCursor"]
+        return nodes
 
     def file_upload(self, content_type: str, filename: str, size: int) -> dict:
         """Request a presigned upload URL from Linear.
@@ -75,12 +96,15 @@ class LinearClient:
             query,
             {"contentType": content_type, "filename": filename, "size": size},
         )
-        return data["fileUpload"]["uploadFile"]
+        result = data["fileUpload"]
+        if not result.get("success"):
+            raise RuntimeError(f"fileUpload mutation failed: {result}")
+        return result["uploadFile"]
 
     def put_asset(self, upload_url: str, headers: list[dict], data: bytes) -> None:
         """PUT asset bytes to the presigned upload URL."""
         hdict = {h["key"]: h["value"] for h in headers}
-        r = self._http.put(upload_url, content=data, headers=hdict)
+        r = httpx.put(upload_url, content=data, headers=hdict, timeout=60)
         r.raise_for_status()
 
     def document_create(
@@ -107,7 +131,10 @@ class LinearClient:
             query,
             {"title": title, "content": content, "projectId": project_id},
         )
-        return data["documentCreate"]["document"]
+        result = data["documentCreate"]
+        if not result.get("success"):
+            raise RuntimeError(f"documentCreate mutation failed: {result}")
+        return result["document"]
 
     def get_document(self, doc_id: str) -> dict | None:
         """Fetch a document by ID. Returns {id, content} or None if not found."""
