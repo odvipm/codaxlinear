@@ -79,10 +79,16 @@ class CodaClient:
         status_url = export["href"]
 
         while True:
-            status = self._get_url(status_url)
+            try:
+                status = self._get_url(status_url)
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code == 404:
+                    time.sleep(1)
+                    continue
+                raise
             if status.get("status") == "complete":
                 download_link = status["downloadLink"]
-                response = self._http.get(download_link)
+                response = httpx.get(download_link, follow_redirects=True, timeout=60)
                 response.raise_for_status()
                 return response.text
             if status.get("status") in {"failed", "error"}:
