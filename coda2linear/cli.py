@@ -3,6 +3,7 @@ import csv
 import logging
 import os
 import sys
+from urllib.parse import urlparse
 
 import httpx
 import yaml
@@ -192,6 +193,13 @@ def _migrate_one_page(
                 if attempt == 0:
                     log.info("Signed URL expired; re-fetching page Markdown for %s", page_id)
                     markdown = coda.get_page_content_markdown(doc_id, page_id)
+                    old_path = urlparse(url).path
+                    fresh = next(
+                        (u for u in extract_asset_urls(markdown) if urlparse(u).path == old_path),
+                        None,
+                    )
+                    if fresh:
+                        url = fresh
                 else:
                     raise
 
@@ -285,9 +293,19 @@ def cmd_migrate(args: argparse.Namespace) -> None:
     if args.dry_run:
         print("DRY RUN — no writes to Linear.")
 
-    with httpx.Client(follow_redirects=True, timeout=60) as http:
-        coda = CodaClient(coda_token, http)
-        linear = LinearClient(linear_token, http)
+    with httpx.Client(
+        headers={"Authorization": f"Bearer {coda_token}"},
+        follow_redirects=True,
+        timeout=60,
+    ) as coda_http, httpx.Client(
+        headers={
+            "Authorization": linear_token,
+            "Content-Type": "application/json",
+        },
+        timeout=60,
+    ) as linear_http:
+        coda = CodaClient(coda_token, coda_http)
+        linear = LinearClient(linear_token, linear_http)
 
         _preflight(coda, linear, entries)
 
@@ -350,8 +368,14 @@ def cmd_verify(args: argparse.Namespace) -> None:
 
     print(f"Verifying {len(rows)} document(s)...")
 
-    with httpx.Client(timeout=30) as http:
-        linear = LinearClient(linear_token, http)
+    with httpx.Client(
+        headers={
+            "Authorization": linear_token,
+            "Content-Type": "application/json",
+        },
+        timeout=30,
+    ) as linear_http:
+        linear = LinearClient(linear_token, linear_http)
         failed: list[dict] = []
 
         for row in rows:
