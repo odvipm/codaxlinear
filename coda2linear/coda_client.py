@@ -39,9 +39,7 @@ class CodaClient:
         items: list[dict] = []
         page_token: str | None = None
         while True:
-            params: dict = {"limit": 50}
-            if page_token:
-                params["pageToken"] = page_token
+            params: dict = {"pageToken": page_token} if page_token else {"limit": 50}
             data = self._get(path, params)
             items.extend(data.get("items", []))
             page_token = data.get("nextPageToken")
@@ -64,9 +62,11 @@ class CodaClient:
         chunks: list[str] = []
         page_token: str | None = None
         while True:
-            params: dict = {"format": "markdown", "limit": 50}
-            if page_token:
-                params["pageToken"] = page_token
+            params: dict = (
+                {"pageToken": page_token}
+                if page_token
+                else {"format": "markdown", "limit": 50}
+            )
             data = self._get(f"/docs/{doc_id}/pages/{page_id}/content", params)
             if "output" in data:
                 chunks.append(data["output"])
