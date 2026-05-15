@@ -19,6 +19,28 @@ EXTERNAL_GIF_HOSTS = frozenset({
     "i.imgur.com",
     "imgur.com",
 })
+ASSET_EXTENSIONS = frozenset({
+    ".apng",
+    ".avif",
+    ".bmp",
+    ".doc",
+    ".docx",
+    ".gif",
+    ".heic",
+    ".jpeg",
+    ".jpg",
+    ".mov",
+    ".mp4",
+    ".pdf",
+    ".png",
+    ".ppt",
+    ".pptx",
+    ".svg",
+    ".webp",
+    ".xls",
+    ".xlsx",
+    ".zip",
+})
 
 
 def extract_asset_urls(markdown: str) -> list[str]:
@@ -72,8 +94,13 @@ def is_external_gif_url(url: str, content_type: str = "") -> bool:
 
 
 def should_rehost(url: str, content_type: str = "") -> bool:
-    """True if this URL should be downloaded and re-uploaded to Linear."""
-    return is_coda_url(url) or is_external_gif_url(url, content_type)
+    """True if an extracted asset URL should be re-uploaded to Linear."""
+    path = urlparse(url).path.lower()
+    return (
+        is_coda_url(url)
+        or is_external_gif_url(url, content_type)
+        or any(path.endswith(ext) for ext in ASSET_EXTENSIONS)
+    )
 
 
 def rewrite_asset_urls(markdown: str, url_map: dict[str, str]) -> str:

@@ -116,8 +116,16 @@ def test_should_rehost_external_gif():
     assert should_rehost("https://media.giphy.com/media/abc/giphy.gif") is True
 
 
-def test_should_not_rehost_external_non_gif():
-    assert should_rehost("https://external-site.com/image.png") is False
+def test_should_rehost_exported_s3_image():
+    url = (
+        "https://coda-us-west-2-prod-workflow-objects.s3.us-west-2.amazonaws.com/"
+        "DOC_EXPORT_RENDERING/image.png?X-Amz-Signature=abc"
+    )
+    assert should_rehost(url) is True
+
+
+def test_should_rehost_external_non_gif_image():
+    assert should_rehost("https://external-site.com/image.png") is True
 
 
 def test_should_not_rehost_regular_link():

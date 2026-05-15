@@ -105,7 +105,7 @@ class CodaClient:
             PermissionError: on 403 (signed URL likely expired — caller should
                              re-fetch the page Markdown and retry).
         """
-        r = self._http.get(url)
+        r = httpx.get(url, follow_redirects=True, timeout=60)
         if r.status_code == 403:
             raise PermissionError(
                 f"Asset download 403 (signed URL may have expired): {url}"

@@ -145,3 +145,33 @@ def test_get_page_content_markdown_downloads_export_without_coda_auth(monkeypatc
             "timeout": 60,
         }
     ]
+
+
+def test_download_asset_uses_unauthenticated_request(monkeypatch):
+    download_calls = []
+
+    def fake_get(url, **kwargs):
+        download_calls.append({"url": url, **kwargs})
+        request = httpx.Request("GET", url)
+        return httpx.Response(
+            200,
+            content=b"image-bytes",
+            headers={"content-type": "image/png"},
+            request=request,
+        )
+
+    monkeypatch.setattr("coda2linear.coda_client.httpx.get", fake_get)
+    client = CodaClient("token", RecordingHttp())
+
+    assert client.download_asset("https://exports.coda.io/images/pouch.png") == (
+        b"image-bytes",
+        "image/png",
+        "pouch.png",
+    )
+    assert download_calls == [
+        {
+            "url": "https://exports.coda.io/images/pouch.png",
+            "follow_redirects": True,
+            "timeout": 60,
+        }
+    ]
