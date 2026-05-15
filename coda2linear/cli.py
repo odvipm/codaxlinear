@@ -193,8 +193,6 @@ def _migrate_one_page(
                     markdown = coda.get_page_content_markdown(doc_id, page_id)
                 else:
                     raise
-        else:
-            raise RuntimeError(f"Could not download asset after retry: {url}")
 
         size = len(asset_bytes)
         is_oversized = size > MAX_ASSET_BYTES
@@ -205,7 +203,7 @@ def _migrate_one_page(
             continue
 
         # upload
-        new_url, rehosted = _upload_asset(
+        new_url, _ = _upload_asset(
             url, asset_bytes, content_type, filename, linear, state, dry_run
         )
 
@@ -267,7 +265,7 @@ def cmd_migrate(args: argparse.Namespace) -> None:
         sys.exit(f"Error: {args.mapping} not found — run 'coda2linear discover' first")
 
     with open(args.mapping, encoding="utf-8") as f:
-        mapping_data = yaml.safe_load(f)
+        mapping_data = yaml.safe_load(f) or {}
     all_entries: list[dict] = mapping_data.get("pages", [])
     entries = [e for e in all_entries if e.get("linear_project_id")]
 
