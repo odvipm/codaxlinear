@@ -202,10 +202,18 @@ def _migrate_one_page(
             images_skipped += 1
             continue
 
-        # upload
-        new_url, _ = _upload_asset(
-            url, asset_bytes, content_type, filename, linear, state, dry_run
-        )
+        # upload — external GIFs fall back to original URL on any error
+        try:
+            new_url, _ = _upload_asset(
+                url, asset_bytes, content_type, filename, linear, state, dry_run
+            )
+        except Exception as upload_err:
+            if is_external_gif_url(url, content_type):
+                log.warning("External GIF rehost failed (%s); keeping original URL: %s", upload_err, url)
+                callout_lines.append(external_gif_fallback_callout(url))
+                images_skipped += 1
+                continue
+            raise  # Coda-hosted asset upload failure → abort page
 
         if new_url is None:
             callout_lines.append(oversized_asset_callout(url))
@@ -323,6 +331,44 @@ def cmd_migrate(args: argparse.Namespace) -> None:
         sys.exit(1)
 
 
+def cmd_verify(args: argparse.Namespace) -> None:
+    linear_token = os.environ.get("LINEAR_API_TOKEN")
+    if not linear_token:
+        sys.exit("Error: LINEAR_API_TOKEN not set")
+
+    if not os.path.exists(args.report):
+        sys.exit(f"Error: {args.report} not found — run 'coda2linear migrate' first")
+
+    import csv as _csv
+    with open(args.report, newline="", encoding="utf-8") as f:
+        reader = _csv.DictReader(f)
+        rows = [r for r in reader if r.get("status") == "success"]
+
+    if not rows:
+        print("No successfully migrated documents found in report.csv. Nothing to verify.")
+        return
+
+    print(f"Verifying {len(rows)} document(s)...")
+
+    with httpx.Client(timeout=30) as http:
+        linear = LinearClient(linear_token, http)
+        failed: list[dict] = []
+
+        for row in rows:
+            doc = linear.get_document(row["linear_document_id"])
+            if not doc or not (doc.get("content") or "").strip():
+                failed.append(row)
+                print(f"  ✗ MISSING/EMPTY: '{row['coda_page_name']}' (ID: {row['linear_document_id']})")
+            else:
+                print(f"  ✓ OK: '{row['coda_page_name']}'")
+
+    if failed:
+        print(f"\nVERIFY FAILED: {len(failed)}/{len(rows)} document(s) missing or empty.")
+        sys.exit(1)
+    else:
+        print(f"\nVERIFY PASSED: all {len(rows)} document(s) confirmed.")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="coda2linear",
@@ -358,5 +404,4 @@ def main() -> None:
     elif args.command == "migrate":
         cmd_migrate(args)
     elif args.command == "verify":
-        print("Error: verify not yet implemented", file=sys.stderr)
-        sys.exit(1)
+        cmd_verify(args)
