@@ -83,9 +83,20 @@ def rewrite_asset_urls(markdown: str, url_map: dict[str, str]) -> str:
     return markdown
 
 
-def build_title(page_name: str, parent_names: list[str]) -> str:
-    """Build a hierarchy-prefixed title: 'Grandparent / Parent / Page'."""
-    return " / ".join(parent_names + [page_name])
+def build_title(
+    page_name: str,
+    parent_names: list[str],
+    title_root: str | None = None,
+) -> str:
+    """Build a hierarchy-prefixed title, optionally starting at title_root."""
+    names = parent_names
+    if title_root:
+        try:
+            root_index = names.index(title_root)
+            names = names[root_index:]
+        except ValueError:
+            pass
+    return " / ".join(names + [page_name])
 
 
 def oversized_asset_callout(original_url: str) -> str:

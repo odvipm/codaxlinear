@@ -166,6 +166,24 @@ def test_build_title_deep_hierarchy():
     assert build_title("Setup", ["Onboarding", "Day 1"]) == "Onboarding / Day 1 / Setup"
 
 
+def test_build_title_can_start_at_named_root():
+    result = build_title(
+        "Overview",
+        ["Digital Transformation Team", "Projects", "Pouch Receiving System"],
+        title_root="Pouch Receiving System",
+    )
+    assert result == "Pouch Receiving System / Overview"
+
+
+def test_build_title_root_not_found_keeps_full_hierarchy():
+    result = build_title(
+        "Overview",
+        ["Digital Transformation Team", "Projects", "Pouch Receiving System"],
+        title_root="Other Project",
+    )
+    assert result == "Digital Transformation Team / Projects / Pouch Receiving System / Overview"
+
+
 def test_build_title_single_name():
     assert build_title("Home", []) == "Home"
 

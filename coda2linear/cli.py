@@ -154,6 +154,7 @@ def _migrate_one_page(
     coda: CodaClient,
     linear: LinearClient,
     dry_run: bool,
+    title_root: str | None,
 ) -> dict:
     """Migrate one Coda page to a Linear project document.
 
@@ -238,7 +239,11 @@ def _migrate_one_page(
     for callout in callout_lines:
         final_markdown += callout
 
-    title = build_title(entry["coda_page_name"], entry.get("coda_parent_names", []))
+    title = build_title(
+        entry["coda_page_name"],
+        entry.get("coda_parent_names", []),
+        title_root=title_root,
+    )
 
     if dry_run:
         print(
@@ -316,14 +321,21 @@ def cmd_migrate(args: argparse.Namespace) -> None:
             page_id = entry["coda_page_id"]
             page_status = state["pages"].get(page_id, {}).get("status", "")
 
-            if page_status == "success":
+            if page_status == "success" and not args.force:
                 print(f"  [{i}/{len(entries)}] Skipping (already migrated): {entry['coda_page_name']}")
                 skipped += 1
                 continue
 
             print(f"  [{i}/{len(entries)}] Migrating: {entry['coda_page_name']}")
             try:
-                result = _migrate_one_page(entry, state, coda, linear, args.dry_run)
+                result = _migrate_one_page(
+                    entry,
+                    state,
+                    coda,
+                    linear,
+                    args.dry_run,
+                    args.title_root,
+                )
                 state["pages"][page_id] = {
                     "status": result["status"],
                     "linear_document_id": result.get("linear_document_id", ""),
@@ -410,6 +422,15 @@ def main() -> None:
     migrate_p.add_argument("--mapping", default="mapping.yaml")
     migrate_p.add_argument("--state-file", default="state.json")
     migrate_p.add_argument("--report", default="report.csv")
+    migrate_p.add_argument(
+        "--title-root",
+        help="Start generated Linear document titles at this Coda parent/page name",
+    )
+    migrate_p.add_argument(
+        "--force",
+        action="store_true",
+        help="Re-migrate pages even if state.json says they already succeeded",
+    )
 
     # verify (full definition added in Task 12)
     verify_p = sub.add_parser("verify", help="Confirm migrated documents exist in Linear")

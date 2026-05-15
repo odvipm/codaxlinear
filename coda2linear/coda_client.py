@@ -20,6 +20,9 @@ class CodaClient:
 
     def _get(self, path: str, params: dict | None = None) -> dict:
         url = f"{CODA_BASE}{path}"
+        return self._get_url(url, params)
+
+    def _get_url(self, url: str, params: dict | None = None) -> dict:
         while True:
             r = self._http.get(url, params=params)
             if r.status_code == 429:
@@ -33,6 +36,16 @@ class CodaClient:
                 )
             r.raise_for_status()
             return r.json()
+
+    def _post(self, path: str, json: dict | None = None) -> dict:
+        url = f"{CODA_BASE}{path}"
+        r = self._http.post(url, json=json)
+        if r.status_code in (401, 403):
+            raise PermissionError(
+                f"Coda auth error {r.status_code}: check CODA_API_TOKEN"
+            )
+        r.raise_for_status()
+        return r.json()
 
     def _paginate(self, path: str) -> list[dict]:
         """Fetch all pages of a list endpoint, returning combined items list."""
@@ -58,25 +71,23 @@ class CodaClient:
         return self._paginate(f"/docs/{doc_id}/pages")
 
     def get_page_content_markdown(self, doc_id: str, page_id: str) -> str:
-        """Fetch full Markdown content of a page (handles pagination)."""
-        chunks: list[str] = []
-        page_token: str | None = None
+        """Export full Markdown content of a page."""
+        export = self._post(
+            f"/docs/{doc_id}/pages/{page_id}/export",
+            {"outputFormat": "markdown"},
+        )
+        status_url = export["href"]
+
         while True:
-            params: dict = (
-                {"pageToken": page_token}
-                if page_token
-                else {"format": "markdown", "limit": 50}
-            )
-            data = self._get(f"/docs/{doc_id}/pages/{page_id}/content", params)
-            if "output" in data:
-                chunks.append(data["output"])
-            for item in data.get("items", []):
-                if isinstance(item, dict) and "text" in item:
-                    chunks.append(item["text"])
-            page_token = data.get("nextPageToken")
-            if not page_token:
-                break
-        return "\n".join(chunks)
+            status = self._get_url(status_url)
+            if status.get("status") == "complete":
+                download_link = status["downloadLink"]
+                response = self._http.get(download_link)
+                response.raise_for_status()
+                return response.text
+            if status.get("status") in {"failed", "error"}:
+                raise RuntimeError(f"Coda export failed for page {page_id}: {status}")
+            time.sleep(1)
 
     def download_asset(self, url: str) -> tuple[bytes, str, str]:
         """Download an asset URL.
