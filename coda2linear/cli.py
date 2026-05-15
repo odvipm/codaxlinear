@@ -25,6 +25,7 @@ log = logging.getLogger(__name__)
 
 MAX_ASSET_BYTES = 25 * 1024 * 1024   # 25 MB — Linear hard cap
 LARGE_GIF_BYTES = 10 * 1024 * 1024   # 10 MB — log conversion suggestion
+_DRY_RUN_URL = "__dry_run_placeholder__"
 
 
 # ── discover ──────────────────────────────────────────────────────────────────
@@ -136,7 +137,7 @@ def _upload_asset(
         return None, False
 
     if dry_run:
-        return "__dry_run_placeholder__", True
+        return _DRY_RUN_URL, True
 
     upload_info = linear.file_upload(content_type, filename, size)
     linear.put_asset(upload_info["uploadUrl"], upload_info["headers"], asset_bytes)
