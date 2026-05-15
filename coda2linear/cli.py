@@ -80,7 +80,69 @@ def cmd_discover(args: argparse.Namespace) -> None:
     print("  3. Run: coda2linear migrate")
 
 
-# ── Placeholder for migrate and verify (added in Tasks 10–12) ─────────────────
+# ── migrate helpers ───────────────────────────────────────────────────────────
+
+def _preflight(coda: CodaClient, linear: LinearClient, entries: list[dict]) -> None:
+    """Verify API tokens and all linear_project_id values before touching Linear."""
+    print("Running pre-flight checks...")
+
+    viewer = linear.get_viewer()
+    print(f"  Linear ✓  authenticated as {viewer['name']} ({viewer['email']})")
+
+    docs = coda.list_docs()
+    print(f"  Coda   ✓  authenticated, {len(docs)} doc(s) accessible")
+
+    projects = {p["id"]: p["name"] for p in linear.get_projects()}
+    mapped_ids = {e["linear_project_id"] for e in entries if e.get("linear_project_id")}
+    missing = [pid for pid in mapped_ids if pid not in projects]
+    if missing:
+        for pid in missing:
+            pages_for_pid = [e["coda_page_name"] for e in entries if e.get("linear_project_id") == pid]
+            print(
+                f"  ERROR: linear_project_id '{pid}' not found in Linear "
+                f"(affects: {', '.join(pages_for_pid)})",
+                file=sys.stderr,
+            )
+        sys.exit("Pre-flight failed. Fix mapping.yaml and retry.")
+
+    print(f"  Projects ✓  {len(mapped_ids)} unique project ID(s) all verified.")
+
+
+def _upload_asset(
+    url: str,
+    asset_bytes: bytes,
+    content_type: str,
+    filename: str,
+    linear: LinearClient,
+    state: dict,
+    dry_run: bool,
+) -> tuple[str | None, bool]:
+    """Upload one asset to Linear (or simulate in dry-run).
+
+    Returns:
+        (new_url, rehosted): new_url is None if the asset was skipped/oversized.
+    """
+    size = len(asset_bytes)
+
+    if is_gif(url, content_type) and size > LARGE_GIF_BYTES:
+        log.warning(
+            "GIF %.1f MB > 10 MB — consider converting to MP4: %s",
+            size / 1024 / 1024,
+            url,
+        )
+
+    if size > MAX_ASSET_BYTES:
+        log.warning("Asset %.1f MB exceeds 25 MB Linear cap; skipping: %s", size / 1024 / 1024, url)
+        return None, False
+
+    if dry_run:
+        return "__dry_run_placeholder__", True
+
+    upload_info = linear.file_upload(content_type, filename, size)
+    linear.put_asset(upload_info["uploadUrl"], upload_info["headers"], asset_bytes)
+    new_url = upload_info["assetUrl"]
+    state["uploaded_assets"][url] = new_url
+    return new_url, True
 
 
 def main() -> None:
