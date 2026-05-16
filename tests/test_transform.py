@@ -53,6 +53,30 @@ def test_convert_html_to_markdown_preserves_image_position():
     )
 
 
+def test_convert_html_to_markdown_preserves_table_structure():
+    html = """
+    <p>Before table</p>
+    <table>
+      <thead>
+        <tr><th>Status</th><th>Owner</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Open</td><td><a href="https://coda.io/d/doc/page">Team A</a></td></tr>
+        <tr><td>Blocked | urgent</td><td>Team B</td></tr>
+      </tbody>
+    </table>
+    <p>After table</p>
+    """
+    assert convert_html_to_markdown(html) == (
+        "Before table\n\n"
+        "| Status | Owner |\n"
+        "|---|---|\n"
+        "| Open | [Team A](https://coda.io/d/doc/page) |\n"
+        "| Blocked \\| urgent | Team B |\n\n"
+        "After table"
+    )
+
+
 def test_extract_reference_style_image():
     md = "![alt text][ref1]\n\n[ref1]: https://codahosted.io/docs/abc/blobs/img.png"
     assert extract_asset_urls(md) == ["https://codahosted.io/docs/abc/blobs/img.png"]

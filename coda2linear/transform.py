@@ -91,48 +91,125 @@ class _HtmlToMarkdownParser(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.parts: list[str] = []
         self.link_stack: list[str | None] = []
+        self.in_table = False
+        self.table_rows: list[list[str]] = []
+        self.current_row: list[str] | None = None
+        self.current_cell_parts: list[str] | None = None
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         attr = {k.lower(): v or "" for k, v in attrs}
         tag = tag.lower()
-        if tag in {"p", "div", "section", "article"}:
+        if tag == "table":
+            self._break()
+            self.in_table = True
+            self.table_rows = []
+        elif self.in_table:
+            self._handle_table_starttag(tag, attr)
+        elif tag in {"p", "div", "section", "article"}:
             self._break()
         elif tag in {"h1", "h2", "h3", "h4", "h5", "h6"}:
             self._break()
-            self.parts.append("#" * int(tag[1]) + " ")
+            self._append("#" * int(tag[1]) + " ")
         elif tag == "br":
-            self.parts.append("\n")
+            self._append("\n")
         elif tag == "li":
             self._break(single=True)
-            self.parts.append("- ")
+            self._append("- ")
         elif tag == "a":
             href = attr.get("href")
             self.link_stack.append(href)
             if href:
-                self.parts.append("[")
+                self._append("[")
         elif tag == "img":
             src = attr.get("src")
             if src:
                 alt = attr.get("alt", "")
                 self._break()
-                self.parts.append(f"![{alt}]({src})")
+                self._append(f"![{alt}]({src})")
                 self._break()
 
     def handle_endtag(self, tag: str) -> None:
         tag = tag.lower()
-        if tag in {"p", "div", "section", "article", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol"}:
+        if self.in_table:
+            self._handle_table_endtag(tag)
+        elif tag in {"p", "div", "section", "article", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol"}:
             self._break()
         elif tag == "li":
             self._break(single=True)
         elif tag == "a" and self.link_stack:
             href = self.link_stack.pop()
             if href:
-                self.parts.append(f"]({href})")
+                self._append(f"]({href})")
 
     def handle_data(self, data: str) -> None:
         text = unescape(data)
         if text.strip():
-            self.parts.append(re.sub(r"\s+", " ", text))
+            self._append(re.sub(r"\s+", " ", text))
+
+    def _append(self, text: str) -> None:
+        if self.in_table and self.current_cell_parts is not None:
+            self.current_cell_parts.append(text)
+        else:
+            self.parts.append(text)
+
+    def _handle_table_starttag(self, tag: str, attr: dict[str, str]) -> None:
+        if tag == "tr":
+            self.current_row = []
+        elif tag in {"td", "th"}:
+            self.current_cell_parts = []
+        elif tag == "br":
+            self._append("<br>")
+        elif tag == "a":
+            href = attr.get("href")
+            self.link_stack.append(href)
+            if href:
+                self._append("[")
+        elif tag == "img":
+            src = attr.get("src")
+            if src:
+                self._append(f"![{attr.get('alt', '')}]({src})")
+        elif tag in {"p", "div"} and self.current_cell_parts:
+            self._append(" ")
+
+    def _handle_table_endtag(self, tag: str) -> None:
+        if tag == "a" and self.link_stack:
+            href = self.link_stack.pop()
+            if href:
+                self._append(f"]({href})")
+        elif tag in {"td", "th"} and self.current_cell_parts is not None:
+            if self.current_row is not None:
+                self.current_row.append(self._clean_cell("".join(self.current_cell_parts)))
+            self.current_cell_parts = None
+        elif tag == "tr":
+            if self.current_row:
+                self.table_rows.append(self.current_row)
+            self.current_row = None
+        elif tag == "table":
+            table_markdown = self._render_table()
+            self.in_table = False
+            self.current_row = None
+            self.current_cell_parts = None
+            if table_markdown:
+                self.parts.append(table_markdown)
+                self._break()
+
+    def _clean_cell(self, text: str) -> str:
+        text = re.sub(r"\s+", " ", text.replace("\n", "<br>")).strip()
+        return text.replace("|", r"\|")
+
+    def _render_table(self) -> str:
+        if not self.table_rows:
+            return ""
+        width = max(len(row) for row in self.table_rows)
+        rows = [row + [""] * (width - len(row)) for row in self.table_rows]
+        header = rows[0]
+        body = rows[1:]
+        lines = [
+            "| " + " | ".join(header) + " |",
+            "|" + "|".join("---" for _ in range(width)) + "|",
+        ]
+        lines.extend("| " + " | ".join(row) + " |" for row in body)
+        return "\n".join(lines)
 
     def _break(self, single: bool = False) -> None:
         current = "".join(self.parts)
