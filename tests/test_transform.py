@@ -1,6 +1,7 @@
 # tests/test_transform.py
 from coda2linear.transform import (
     extract_asset_urls,
+    extract_html_asset_urls,
     is_gif,
     is_coda_url,
     is_external_gif_url,
@@ -21,6 +22,18 @@ def test_extract_inline_image():
 def test_extract_html_img_tag():
     md = '<img src="https://codahosted.io/docs/abc/blobs/img.png" alt="x" />'
     assert extract_asset_urls(md) == ["https://codahosted.io/docs/abc/blobs/img.png"]
+
+
+def test_extract_html_asset_urls_single_and_double_quotes():
+    html = """
+    <p>Before</p>
+    <img src="https://codahosted.io/docs/abc/blobs/a.png" />
+    <img src='https://media.giphy.com/media/abc/giphy.gif' />
+    """
+    assert extract_html_asset_urls(html) == [
+        "https://codahosted.io/docs/abc/blobs/a.png",
+        "https://media.giphy.com/media/abc/giphy.gif",
+    ]
 
 
 def test_extract_reference_style_image():
@@ -167,11 +180,18 @@ def test_build_title_no_parents():
 
 
 def test_build_title_one_parent():
-    assert build_title("Setup", ["Onboarding"]) == "Onboarding / Setup"
+    assert build_title("Setup", ["Onboarding"]) == "Setup"
 
 
 def test_build_title_deep_hierarchy():
-    assert build_title("Setup", ["Onboarding", "Day 1"]) == "Onboarding / Day 1 / Setup"
+    assert build_title("Setup", ["Onboarding", "Day 1"]) == "Setup"
+
+
+def test_build_title_can_include_parents():
+    assert (
+        build_title("Setup", ["Onboarding", "Day 1"], include_parents=True)
+        == "Onboarding / Day 1 / Setup"
+    )
 
 
 def test_build_title_can_start_at_named_root():
@@ -179,6 +199,7 @@ def test_build_title_can_start_at_named_root():
         "Overview",
         ["Digital Transformation Team", "Projects", "Pouch Receiving System"],
         title_root="Pouch Receiving System",
+        include_parents=True,
     )
     assert result == "Pouch Receiving System / Overview"
 
@@ -188,6 +209,7 @@ def test_build_title_root_not_found_keeps_full_hierarchy():
         "Overview",
         ["Digital Transformation Team", "Projects", "Pouch Receiving System"],
         title_root="Other Project",
+        include_parents=True,
     )
     assert result == "Digital Transformation Team / Projects / Pouch Receiving System / Overview"
 

@@ -3,7 +3,7 @@ from urllib.parse import urlparse
 
 # Regex patterns for asset URL extraction
 _INLINE_IMAGE_RE = re.compile(r'!\[[^\]]*\]\(([^)]+)\)')
-_HTML_IMG_RE = re.compile(r'<img[^>]+src="([^"]+)"', re.IGNORECASE)
+_HTML_IMG_RE = re.compile(r"""<img[^>]+src=["']([^"']+)["']""", re.IGNORECASE)
 _REF_DEF_RE = re.compile(r'^\[([^\]]+)\]:\s*(\S+)', re.MULTILINE)
 _INLINE_IMAGE_REF_RE = re.compile(r'!\[[^\]]*\]\[([^\]]+)\]')
 _CODA_LINK_RE = re.compile(r'\[[^\]]+\]\((https://codahosted\.io[^)]+)\)')
@@ -73,6 +73,17 @@ def extract_asset_urls(markdown: str) -> list[str]:
     return result
 
 
+def extract_html_asset_urls(html: str) -> list[str]:
+    """Return ordered, deduplicated image URLs from exported HTML."""
+    seen: set[str] = set()
+    result: list[str] = []
+    for url in _HTML_IMG_RE.findall(html):
+        if url not in seen:
+            seen.add(url)
+            result.append(url)
+    return result
+
+
 def is_gif(url: str, content_type: str = "") -> bool:
     """True if url or content_type indicates a GIF."""
     if content_type:
@@ -114,8 +125,12 @@ def build_title(
     page_name: str,
     parent_names: list[str],
     title_root: str | None = None,
+    include_parents: bool = False,
 ) -> str:
     """Build a hierarchy-prefixed title, optionally starting at title_root."""
+    if not include_parents:
+        return page_name
+
     names = parent_names
     if title_root:
         try:

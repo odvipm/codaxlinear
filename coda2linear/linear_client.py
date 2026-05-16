@@ -25,9 +25,9 @@ class LinearClient:
             payload["variables"] = variables
         for attempt in range(5):
             r = self._http.post(LINEAR_GQL, json=payload)
-            if r.status_code == 429:
+            if r.status_code == 429 or 500 <= r.status_code < 600:
                 wait = 2 ** attempt
-                log.warning("Linear rate limit; backing off %ds", wait)
+                log.warning("Linear transient error %s; backing off %ds", r.status_code, wait)
                 time.sleep(wait)
                 continue
             if r.status_code in (401, 403):
@@ -39,7 +39,7 @@ class LinearClient:
             if "errors" in data:
                 raise RuntimeError(f"GraphQL errors: {data['errors']}")
             return data["data"]
-        raise RuntimeError("Linear rate limit: max retries exceeded")
+        raise RuntimeError("Linear API max retries exceeded")
 
     # ── Public API ────────────────────────────────────────────────────────
 

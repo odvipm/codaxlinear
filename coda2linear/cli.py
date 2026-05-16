@@ -15,6 +15,7 @@ from .transform import (
     build_title,
     count_table_dimensions,
     extract_asset_urls,
+    extract_html_asset_urls,
     external_gif_fallback_callout,
     is_external_gif_url,
     is_gif,
@@ -155,6 +156,7 @@ def _migrate_one_page(
     linear: LinearClient,
     dry_run: bool,
     title_root: str | None,
+    include_parent_titles: bool,
 ) -> dict:
     """Migrate one Coda page to a Linear project document.
 
@@ -169,6 +171,15 @@ def _migrate_one_page(
 
     # extract all asset URLs
     urls = extract_asset_urls(markdown)
+    appended_html_media = False
+    if not urls:
+        html = coda.get_page_content_html(doc_id, page_id)
+        urls = extract_html_asset_urls(html)
+        if urls:
+            markdown += "\n\n## Migrated media\n\n"
+            markdown += "\n".join(f"![]({url})" for url in urls)
+            markdown += "\n"
+            appended_html_media = True
 
     url_map: dict[str, str] = {}
     callout_lines: list[str] = []
@@ -194,6 +205,10 @@ def _migrate_one_page(
                 if attempt == 0:
                     log.info("Signed URL expired; re-fetching page Markdown for %s", page_id)
                     markdown = coda.get_page_content_markdown(doc_id, page_id)
+                    if appended_html_media:
+                        markdown += "\n\n## Migrated media\n\n"
+                        markdown += "\n".join(f"![]({u})" for u in urls)
+                        markdown += "\n"
                     old_path = urlparse(url).path
                     fresh = next(
                         (u for u in extract_asset_urls(markdown) if urlparse(u).path == old_path),
@@ -243,6 +258,7 @@ def _migrate_one_page(
         entry["coda_page_name"],
         entry.get("coda_parent_names", []),
         title_root=title_root,
+        include_parents=include_parent_titles,
     )
 
     if dry_run:
@@ -335,6 +351,7 @@ def cmd_migrate(args: argparse.Namespace) -> None:
                     linear,
                     args.dry_run,
                     args.title_root,
+                    args.include_parent_titles,
                 )
                 state["pages"][page_id] = {
                     "status": result["status"],
@@ -425,6 +442,11 @@ def main() -> None:
     migrate_p.add_argument(
         "--title-root",
         help="Start generated Linear document titles at this Coda parent/page name",
+    )
+    migrate_p.add_argument(
+        "--include-parent-titles",
+        action="store_true",
+        help="Include Coda parent page names in generated Linear document titles",
     )
     migrate_p.add_argument(
         "--force",

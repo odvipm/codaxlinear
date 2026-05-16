@@ -81,6 +81,36 @@ def test_get_page_content_markdown_exports_and_downloads_markdown(monkeypatch):
     }
 
 
+def test_get_page_content_html_exports_html(monkeypatch):
+    stub_export_download(monkeypatch, "<p>Body</p><img src='https://example.com/a.png'>")
+    http = RecordingHttp(
+        post_responses=[
+            {
+                "id": "export-1",
+                "status": "inProgress",
+                "href": "https://coda.io/apis/v1/docs/doc-1/pages/page-1/export/export-1",
+            }
+        ],
+        get_responses=[
+            {
+                "id": "export-1",
+                "status": "complete",
+                "downloadLink": "https://exports.coda.io/page-1.html",
+            },
+        ],
+    )
+    client = CodaClient("token", http)
+
+    assert client.get_page_content_html("doc-1", "page-1") == (
+        "<p>Body</p><img src='https://example.com/a.png'>"
+    )
+    assert http.calls[0] == {
+        "method": "POST",
+        "url": "https://coda.io/apis/v1/docs/doc-1/pages/page-1/export",
+        "json": {"outputFormat": "html"},
+    }
+
+
 def test_get_page_content_markdown_retries_export_status_404(monkeypatch):
     monkeypatch.setattr("coda2linear.coda_client.time.sleep", lambda _seconds: None)
     stub_export_download(monkeypatch, "# Exported Page\n")

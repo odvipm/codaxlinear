@@ -70,11 +70,10 @@ class CodaClient:
         """Return all pages in a doc: [{id, name, parent, ...}]."""
         return self._paginate(f"/docs/{doc_id}/pages")
 
-    def get_page_content_markdown(self, doc_id: str, page_id: str) -> str:
-        """Export full Markdown content of a page."""
+    def _export_page_content(self, doc_id: str, page_id: str, output_format: str) -> str:
         export = self._post(
             f"/docs/{doc_id}/pages/{page_id}/export",
-            {"outputFormat": "markdown"},
+            {"outputFormat": output_format},
         )
         status_url = export["href"]
 
@@ -94,6 +93,14 @@ class CodaClient:
             if status.get("status") in {"failed", "error"}:
                 raise RuntimeError(f"Coda export failed for page {page_id}: {status}")
             time.sleep(1)
+
+    def get_page_content_markdown(self, doc_id: str, page_id: str) -> str:
+        """Export full Markdown content of a page."""
+        return self._export_page_content(doc_id, page_id, "markdown")
+
+    def get_page_content_html(self, doc_id: str, page_id: str) -> str:
+        """Export full HTML content of a page."""
+        return self._export_page_content(doc_id, page_id, "html")
 
     def download_asset(self, url: str) -> tuple[bytes, str, str]:
         """Download an asset URL.
