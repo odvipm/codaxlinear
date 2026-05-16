@@ -66,6 +66,41 @@ def test_convert_html_to_markdown_preserves_inline_emphasis():
     )
 
 
+def test_convert_html_to_markdown_preserves_code_strike_quote_and_divider():
+    html = """
+    <p>Run <code>coda2linear migrate</code> then <s>ignore this</s>.</p>
+    <blockquote><p>Important note</p><p>Second line</p></blockquote>
+    <hr>
+    <pre><code>first line
+second line</code></pre>
+    """
+
+    assert convert_html_to_markdown(html) == (
+        "Run `coda2linear migrate` then ~ignore this~.\n\n"
+        "> Important note\n"
+        "> Second line\n\n"
+        "___\n\n"
+        "```\n"
+        "first line\n"
+        "second line\n"
+        "```"
+    )
+
+
+def test_convert_html_to_markdown_preserves_checklists():
+    html = """
+    <ul>
+      <li><input type="checkbox" checked> Done item</li>
+      <li><input type="checkbox"> Pending item</li>
+    </ul>
+    """
+
+    assert convert_html_to_markdown(html) == (
+        "- [x] Done item\n"
+        "- [ ] Pending item"
+    )
+
+
 def test_convert_html_to_markdown_preserves_table_structure():
     html = """
     <p>Before table</p>

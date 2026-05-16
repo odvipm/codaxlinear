@@ -96,16 +96,28 @@ class _HtmlToMarkdownParser(HTMLParser):
         self.current_row: list[str] | None = None
         self.current_cell_parts: list[str] | None = None
         self.list_stack: list[dict[str, int | str]] = []
+        self.in_pre = False
+        self.current_pre_parts: list[str] | None = None
+        self.current_blockquote_parts: list[str] | None = None
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         attr = {k.lower(): v or "" for k, v in attrs}
         tag = tag.lower()
-        if tag == "table":
+        if tag == "pre":
+            self._break()
+            self.in_pre = True
+            self.current_pre_parts = []
+        elif tag == "table":
             self._break()
             self.in_table = True
             self.table_rows = []
         elif self.in_table:
             self._handle_table_starttag(tag, attr)
+        elif self.in_pre:
+            pass
+        elif tag == "blockquote":
+            self._break()
+            self.current_blockquote_parts = []
         elif tag in {"p", "div", "section", "article"}:
             self._break()
         elif tag in {"h1", "h2", "h3", "h4", "h5", "h6"}:
@@ -113,10 +125,18 @@ class _HtmlToMarkdownParser(HTMLParser):
             self._append("#" * int(tag[1]) + " ")
         elif tag == "br":
             self._append("\n")
+        elif tag == "hr":
+            self._break()
+            self._append("___")
+            self._break()
         elif tag in {"strong", "b"}:
             self._append("**")
         elif tag in {"em", "i"}:
             self._append("*")
+        elif tag in {"s", "strike", "del"}:
+            self._append("~")
+        elif tag == "code":
+            self._append("`")
         elif tag in {"ol", "ul"}:
             if not self.list_stack:
                 self._break()
@@ -125,6 +145,8 @@ class _HtmlToMarkdownParser(HTMLParser):
             self.list_stack.append({"type": tag, "counter": 0})
         elif tag == "li":
             self._start_list_item()
+        elif tag == "input" and attr.get("type", "").lower() == "checkbox":
+            self._append("[x]" if "checked" in attr else "[ ]")
         elif tag == "a":
             href = attr.get("href")
             self.link_stack.append(href)
@@ -140,8 +162,23 @@ class _HtmlToMarkdownParser(HTMLParser):
 
     def handle_endtag(self, tag: str) -> None:
         tag = tag.lower()
-        if self.in_table:
+        if self.in_pre and tag == "pre":
+            code = "".join(self.current_pre_parts or []).strip("\n")
+            self.in_pre = False
+            self.current_pre_parts = None
+            self._append(f"```\n{code}\n```")
+            self._break()
+        elif self.in_table:
             self._handle_table_endtag(tag)
+        elif self.in_pre:
+            pass
+        elif tag == "blockquote" and self.current_blockquote_parts is not None:
+            quote = "".join(self.current_blockquote_parts)
+            self.current_blockquote_parts = None
+            quote_lines = [line.strip() for line in quote.splitlines() if line.strip()]
+            if quote_lines:
+                self.parts.append("\n".join(f"> {line}" for line in quote_lines))
+                self._break()
         elif tag in {"p", "div", "section", "article", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol"}:
             if tag in {"ul", "ol"} and self.list_stack:
                 self.list_stack.pop()
@@ -150,6 +187,10 @@ class _HtmlToMarkdownParser(HTMLParser):
             self._append("**")
         elif tag in {"em", "i"}:
             self._append("*")
+        elif tag in {"s", "strike", "del"}:
+            self._append("~")
+        elif tag == "code":
+            self._append("`")
         elif tag == "li":
             self._break(single=True)
         elif tag == "a" and self.link_stack:
@@ -159,12 +200,18 @@ class _HtmlToMarkdownParser(HTMLParser):
 
     def handle_data(self, data: str) -> None:
         text = unescape(data)
-        if text.strip():
+        if self.in_pre:
+            self._append(text)
+        elif text.strip():
             self._append(re.sub(r"\s+", " ", text))
 
     def _append(self, text: str) -> None:
-        if self.in_table and self.current_cell_parts is not None:
+        if self.in_pre and self.current_pre_parts is not None:
+            self.current_pre_parts.append(text)
+        elif self.in_table and self.current_cell_parts is not None:
             self.current_cell_parts.append(text)
+        elif self.current_blockquote_parts is not None:
+            self.current_blockquote_parts.append(text)
         else:
             self.parts.append(text)
 
@@ -201,6 +248,10 @@ class _HtmlToMarkdownParser(HTMLParser):
             self._append("**")
         elif tag in {"em", "i"}:
             self._append("*")
+        elif tag in {"s", "strike", "del"}:
+            self._append("~")
+        elif tag == "code":
+            self._append("`")
         elif tag == "a":
             href = attr.get("href")
             self.link_stack.append(href)
@@ -222,6 +273,10 @@ class _HtmlToMarkdownParser(HTMLParser):
             self._append("**")
         elif tag in {"em", "i"}:
             self._append("*")
+        elif tag in {"s", "strike", "del"}:
+            self._append("~")
+        elif tag == "code":
+            self._append("`")
         elif tag in {"td", "th"} and self.current_cell_parts is not None:
             if self.current_row is not None:
                 self.current_row.append(self._clean_cell("".join(self.current_cell_parts)))
@@ -258,10 +313,13 @@ class _HtmlToMarkdownParser(HTMLParser):
         return "\n".join(lines)
 
     def _break(self, single: bool = False) -> None:
-        current = "".join(self.parts)
+        if self.current_blockquote_parts is not None:
+            current = "".join(self.current_blockquote_parts)
+        else:
+            current = "".join(self.parts)
         suffix = "\n" if single else "\n\n"
         if current and not current.endswith(suffix):
-            self.parts.append(suffix)
+            self._append(suffix)
 
     def markdown(self) -> str:
         text = "".join(self.parts)
