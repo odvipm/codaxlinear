@@ -95,6 +95,7 @@ class _HtmlToMarkdownParser(HTMLParser):
         self.table_rows: list[list[str]] = []
         self.current_row: list[str] | None = None
         self.current_cell_parts: list[str] | None = None
+        self.list_stack: list[dict[str, int | str]] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         attr = {k.lower(): v or "" for k, v in attrs}
@@ -112,9 +113,14 @@ class _HtmlToMarkdownParser(HTMLParser):
             self._append("#" * int(tag[1]) + " ")
         elif tag == "br":
             self._append("\n")
+        elif tag in {"ol", "ul"}:
+            if not self.list_stack:
+                self._break()
+            elif tag == "ul":
+                self._break(single=True)
+            self.list_stack.append({"type": tag, "counter": 0})
         elif tag == "li":
-            self._break(single=True)
-            self._append("- ")
+            self._start_list_item()
         elif tag == "a":
             href = attr.get("href")
             self.link_stack.append(href)
@@ -133,7 +139,9 @@ class _HtmlToMarkdownParser(HTMLParser):
         if self.in_table:
             self._handle_table_endtag(tag)
         elif tag in {"p", "div", "section", "article", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol"}:
-            self._break()
+            if tag in {"ul", "ol"} and self.list_stack:
+                self.list_stack.pop()
+            self._break(single=bool(self.list_stack))
         elif tag == "li":
             self._break(single=True)
         elif tag == "a" and self.link_stack:
@@ -151,6 +159,28 @@ class _HtmlToMarkdownParser(HTMLParser):
             self.current_cell_parts.append(text)
         else:
             self.parts.append(text)
+
+    def _start_list_item(self) -> None:
+        if not self.list_stack:
+            self._break(single=True)
+            self._append("- ")
+            return
+
+        current_list = self.list_stack[-1]
+        depth = len(self.list_stack)
+        marker: str
+        if current_list["type"] == "ol":
+            current_list["counter"] = int(current_list["counter"]) + 1
+            marker = f"{current_list['counter']}. "
+            if depth == 1 and int(current_list["counter"]) > 1:
+                self._break()
+            else:
+                self._break(single=True)
+        else:
+            marker = "- "
+            self._break(single=True)
+
+        self._append("   " * (depth - 1) + marker)
 
     def _handle_table_starttag(self, tag: str, attr: dict[str, str]) -> None:
         if tag == "tr":
@@ -232,6 +262,7 @@ def convert_html_to_markdown(html: str) -> str:
 
 
 _TABLE_SEPARATOR_RE = re.compile(r"^\|[ \t:|-]+\|[ \t]*$")
+_TOP_LEVEL_BULLET_RE = re.compile(r"^[-*]\s+(.+?)\s*$")
 
 
 def _is_table_separator(line: str) -> bool:
@@ -254,6 +285,55 @@ def _split_glued_table_header(line: str, next_line: str) -> tuple[str, str] | No
     if not prefix or not _looks_like_table_header(header):
         return None
     return prefix, header
+
+
+def _restore_numbered_parent_bullets(lines: list[str]) -> list[str]:
+    restored: list[str] = []
+    i = 0
+    while i < len(lines):
+        if not _TOP_LEVEL_BULLET_RE.match(lines[i]):
+            restored.append(lines[i])
+            i += 1
+            continue
+
+        block_lines: list[str] = []
+        bullet_texts: list[str] = []
+        j = i
+        while j < len(lines):
+            line = lines[j]
+            bullet_match = _TOP_LEVEL_BULLET_RE.match(line)
+            if bullet_match:
+                block_lines.append(line)
+                bullet_texts.append(bullet_match.group(1).strip())
+                j += 1
+                continue
+            if not line.strip():
+                block_lines.append(line)
+                j += 1
+                continue
+            break
+
+        heading_indexes = {
+            index for index, text in enumerate(bullet_texts)
+            if text.endswith(":")
+        }
+        if len(heading_indexes) < 2:
+            restored.extend(block_lines)
+            i = j
+            continue
+
+        number = 1
+        for index, text in enumerate(bullet_texts):
+            if index in heading_indexes:
+                if number > 1:
+                    restored.append("")
+                restored.append(f"{number}. {text}")
+                number += 1
+            else:
+                restored.append(f"   - {text}")
+        i = j
+
+    return restored
 
 
 def normalize_markdown_for_linear(markdown: str) -> str:
@@ -294,6 +374,8 @@ def normalize_markdown_for_linear(markdown: str) -> str:
         )
         if ends_table and i + 1 < len(expanded) and expanded[i + 1].strip():
             normalized.append("")
+
+    normalized = _restore_numbered_parent_bullets(normalized)
 
     text = "\n".join(normalized)
     text = re.sub(r"[ \t]+\n", "\n", text)

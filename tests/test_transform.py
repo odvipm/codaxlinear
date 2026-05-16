@@ -78,6 +78,34 @@ def test_convert_html_to_markdown_preserves_table_structure():
     )
 
 
+def test_convert_html_to_markdown_preserves_ordered_list_with_nested_bullets():
+    html = """
+    <ol>
+      <li>Pouch Creation:
+        <ul>
+          <li>Gather the items to be sent to different departments in Head Office.</li>
+          <li>Create a pouch and encode the list of items into the Pouch Receiving System.</li>
+        </ul>
+      </li>
+      <li>Pouch Handling to Courier:
+        <ul>
+          <li>Send the pouch to the designated courier for dispatch.</li>
+          <li>Pouch status will be "In Transit".</li>
+        </ul>
+      </li>
+    </ol>
+    """
+
+    assert convert_html_to_markdown(html) == (
+        "1. Pouch Creation:\n"
+        "   - Gather the items to be sent to different departments in Head Office.\n"
+        "   - Create a pouch and encode the list of items into the Pouch Receiving System.\n\n"
+        "2. Pouch Handling to Courier:\n"
+        "   - Send the pouch to the designated courier for dispatch.\n"
+        "   - Pouch status will be \"In Transit\"."
+    )
+
+
 def test_normalize_markdown_for_linear_separates_table_from_previous_text():
     md = (
         "List or Department Receivers| Full Name | Email |\n"
@@ -106,6 +134,28 @@ def test_normalize_markdown_for_linear_keeps_existing_table_spacing():
     )
 
     assert normalize_markdown_for_linear(md) == md
+
+
+def test_normalize_markdown_for_linear_restores_numbered_parent_bullets():
+    md = (
+        "- Pouch Creation:\n"
+        "- Gather the items to be sent to different departments in Head Office.\n"
+        "- Create a pouch and encode the list of items into the Pouch Receiving System.\n"
+        "- Pouch status will be \"Pending\".\n"
+        "- Pouch Handling to Courier:\n"
+        "- Send the pouch to the designated courier for dispatch.\n"
+        "- Courier gives a tracking number to the pouch."
+    )
+
+    assert normalize_markdown_for_linear(md) == (
+        "1. Pouch Creation:\n"
+        "   - Gather the items to be sent to different departments in Head Office.\n"
+        "   - Create a pouch and encode the list of items into the Pouch Receiving System.\n"
+        "   - Pouch status will be \"Pending\".\n\n"
+        "2. Pouch Handling to Courier:\n"
+        "   - Send the pouch to the designated courier for dispatch.\n"
+        "   - Courier gives a tracking number to the pouch."
+    )
 
 
 def test_extract_reference_style_image():
