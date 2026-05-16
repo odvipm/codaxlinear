@@ -104,8 +104,19 @@ class LinearClient:
     def put_asset(self, upload_url: str, headers: list[dict], data: bytes) -> None:
         """PUT asset bytes to the presigned upload URL."""
         hdict = {h["key"]: h["value"] for h in headers}
+        hdict["Content-Length"] = str(len(data))
         r = httpx.put(upload_url, content=data, headers=hdict, timeout=60)
-        r.raise_for_status()
+        if r.status_code == 400 and "x-goog-content-length-range" in hdict:
+            retry_headers = dict(hdict)
+            retry_headers.pop("x-goog-content-length-range", None)
+            retry_headers.pop("X-Goog-Content-Length-Range", None)
+            r = httpx.put(upload_url, content=data, headers=retry_headers, timeout=60)
+        try:
+            r.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            raise RuntimeError(
+                f"Linear asset upload failed {r.status_code}: {r.text[:500]}"
+            ) from exc
 
     def document_create(
         self, title: str, content: str, project_id: str
@@ -134,6 +145,22 @@ class LinearClient:
         result = data["documentCreate"]
         if not result.get("success"):
             raise RuntimeError(f"documentCreate mutation failed: {result}")
+        return result["document"]
+
+    def document_update(self, doc_id: str, content: str) -> dict:
+        """Update a document's content. Returns {id, url}."""
+        query = """
+        mutation DocumentUpdate($id: String!, $content: String!) {
+          documentUpdate(id: $id, input: { content: $content }) {
+            success
+            document { id url }
+          }
+        }
+        """
+        data = self._gql(query, {"id": doc_id, "content": content})
+        result = data["documentUpdate"]
+        if not result.get("success"):
+            raise RuntimeError(f"documentUpdate mutation failed: {result}")
         return result["document"]
 
     def get_document(self, doc_id: str) -> dict | None:

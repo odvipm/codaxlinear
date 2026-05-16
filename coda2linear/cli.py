@@ -13,6 +13,7 @@ from .linear_client import LinearClient
 from .state import load_state, save_state, append_report_row
 from .transform import (
     build_title,
+    convert_html_to_markdown,
     count_table_dimensions,
     extract_asset_urls,
     extract_html_asset_urls,
@@ -21,6 +22,7 @@ from .transform import (
     is_gif,
     oversized_asset_callout,
     rewrite_asset_urls,
+    rewrite_coda_page_links,
     should_rehost,
 )
 
@@ -69,6 +71,7 @@ def cmd_discover(args: argparse.Namespace) -> None:
                     "coda_doc_name": doc["name"],
                     "coda_page_id": page["id"],
                     "coda_page_name": page["name"],
+                    "coda_page_url": page.get("browserLink", ""),
                     "coda_parent_names": parent_names,
                     "linear_project_id": "",  # user fills this in
                 })
@@ -171,15 +174,12 @@ def _migrate_one_page(
 
     # extract all asset URLs
     urls = extract_asset_urls(markdown)
-    appended_html_media = False
     if not urls:
         html = coda.get_page_content_html(doc_id, page_id)
-        urls = extract_html_asset_urls(html)
-        if urls:
-            markdown += "\n\n## Migrated media\n\n"
-            markdown += "\n".join(f"![]({url})" for url in urls)
-            markdown += "\n"
-            appended_html_media = True
+        html_urls = extract_html_asset_urls(html)
+        if html_urls:
+            markdown = convert_html_to_markdown(html)
+            urls = extract_asset_urls(markdown)
 
     url_map: dict[str, str] = {}
     callout_lines: list[str] = []
@@ -205,10 +205,6 @@ def _migrate_one_page(
                 if attempt == 0:
                     log.info("Signed URL expired; re-fetching page Markdown for %s", page_id)
                     markdown = coda.get_page_content_markdown(doc_id, page_id)
-                    if appended_html_media:
-                        markdown += "\n\n## Migrated media\n\n"
-                        markdown += "\n".join(f"![]({u})" for u in urls)
-                        markdown += "\n"
                     old_path = urlparse(url).path
                     fresh = next(
                         (u for u in extract_asset_urls(markdown) if urlparse(u).path == old_path),
@@ -289,6 +285,43 @@ def _migrate_one_page(
         "images_migrated": images_migrated,
         "images_skipped": images_skipped,
     }
+
+
+def _rewrite_migrated_coda_links(
+    linear: LinearClient,
+    entries: list[dict],
+    state: dict,
+) -> None:
+    replacements: dict[str, str] = {}
+    for entry in entries:
+        page_state = state["pages"].get(entry["coda_page_id"], {})
+        linear_url = page_state.get("linear_document_url")
+        if page_state.get("status") != "success" or not linear_url:
+            continue
+        replacements[entry["coda_page_id"]] = linear_url
+        if entry.get("coda_page_url"):
+            replacements[entry["coda_page_url"]] = linear_url
+
+    if not replacements:
+        return
+
+    updated = 0
+    for entry in entries:
+        page_state = state["pages"].get(entry["coda_page_id"], {})
+        doc_id = page_state.get("linear_document_id")
+        if page_state.get("status") != "success" or not doc_id:
+            continue
+        doc = linear.get_document(doc_id)
+        if not doc or not doc.get("content"):
+            continue
+        content = doc["content"]
+        rewritten = rewrite_coda_page_links(content, replacements)
+        if rewritten != content:
+            linear.document_update(doc_id, rewritten)
+            updated += 1
+
+    if updated:
+        print(f"Rewrote Coda page links in {updated} Linear document(s).")
 
 
 def cmd_migrate(args: argparse.Namespace) -> None:
@@ -372,6 +405,9 @@ def cmd_migrate(args: argparse.Namespace) -> None:
                     "error_message": reason[:200],
                 })
                 failed += 1
+
+        if not args.dry_run:
+            _rewrite_migrated_coda_links(linear, entries, state)
 
     print(f"\nDone. {succeeded} migrated, {skipped} skipped, {failed} failed.")
     if failed:

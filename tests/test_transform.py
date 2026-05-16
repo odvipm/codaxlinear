@@ -1,5 +1,6 @@
 # tests/test_transform.py
 from coda2linear.transform import (
+    convert_html_to_markdown,
     extract_asset_urls,
     extract_html_asset_urls,
     is_gif,
@@ -7,6 +8,7 @@ from coda2linear.transform import (
     is_external_gif_url,
     should_rehost,
     rewrite_asset_urls,
+    rewrite_coda_page_links,
     build_title,
     oversized_asset_callout,
     external_gif_fallback_callout,
@@ -34,6 +36,21 @@ def test_extract_html_asset_urls_single_and_double_quotes():
         "https://codahosted.io/docs/abc/blobs/a.png",
         "https://media.giphy.com/media/abc/giphy.gif",
     ]
+
+
+def test_convert_html_to_markdown_preserves_image_position():
+    html = """
+    <h1>Setup</h1>
+    <p>Before image</p>
+    <img src="https://codahosted.io/img.png" alt="Screenshot" />
+    <p>After <a href="https://coda.io/d/doc/page">link</a></p>
+    """
+    assert convert_html_to_markdown(html) == (
+        "# Setup\n\n"
+        "Before image\n\n"
+        "![Screenshot](https://codahosted.io/img.png)\n\n"
+        "After [link](https://coda.io/d/doc/page)"
+    )
 
 
 def test_extract_reference_style_image():
@@ -173,6 +190,27 @@ def test_rewrite_url_appearing_multiple_times():
     result = rewrite_asset_urls(md, {"https://codahosted.io/x.png": "https://linear.app/x.png"})
     assert result.count("https://linear.app/x.png") == 2
     assert "codahosted.io" not in result
+
+
+def test_rewrite_coda_page_links_to_linear_urls():
+    md = (
+        "[Guide](https://coda.io/d/doc/Guide_suABC#canvas-X0lOuXfg62) "
+        "and https://coda.io/d/doc/Other_suDEF"
+    )
+    result = rewrite_coda_page_links(
+        md,
+        {
+            "https://coda.io/d/doc/Guide_suABC#canvas-X0lOuXfg62": "https://linear.app/doc-guide",
+            "https://coda.io/d/doc/Other_suDEF": "https://linear.app/doc-other",
+        },
+    )
+    assert result == "[Guide](https://linear.app/doc-guide) and https://linear.app/doc-other"
+
+
+def test_rewrite_coda_page_links_by_page_id_inside_url():
+    md = "[Guide](https://coda.io/d/doc/Guide_suABC#canvas-X0lOuXfg62)"
+    result = rewrite_coda_page_links(md, {"canvas-X0lOuXfg62": "https://linear.app/doc-guide"})
+    assert result == "[Guide](https://linear.app/doc-guide)"
 
 
 def test_build_title_no_parents():

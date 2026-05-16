@@ -1,4 +1,6 @@
 import re
+from html import unescape
+from html.parser import HTMLParser
 from urllib.parse import urlparse
 
 # Regex patterns for asset URL extraction
@@ -84,6 +86,74 @@ def extract_html_asset_urls(html: str) -> list[str]:
     return result
 
 
+class _HtmlToMarkdownParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+        self.link_stack: list[str | None] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attr = {k.lower(): v or "" for k, v in attrs}
+        tag = tag.lower()
+        if tag in {"p", "div", "section", "article"}:
+            self._break()
+        elif tag in {"h1", "h2", "h3", "h4", "h5", "h6"}:
+            self._break()
+            self.parts.append("#" * int(tag[1]) + " ")
+        elif tag == "br":
+            self.parts.append("\n")
+        elif tag == "li":
+            self._break(single=True)
+            self.parts.append("- ")
+        elif tag == "a":
+            href = attr.get("href")
+            self.link_stack.append(href)
+            if href:
+                self.parts.append("[")
+        elif tag == "img":
+            src = attr.get("src")
+            if src:
+                alt = attr.get("alt", "")
+                self._break()
+                self.parts.append(f"![{alt}]({src})")
+                self._break()
+
+    def handle_endtag(self, tag: str) -> None:
+        tag = tag.lower()
+        if tag in {"p", "div", "section", "article", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol"}:
+            self._break()
+        elif tag == "li":
+            self._break(single=True)
+        elif tag == "a" and self.link_stack:
+            href = self.link_stack.pop()
+            if href:
+                self.parts.append(f"]({href})")
+
+    def handle_data(self, data: str) -> None:
+        text = unescape(data)
+        if text.strip():
+            self.parts.append(re.sub(r"\s+", " ", text))
+
+    def _break(self, single: bool = False) -> None:
+        current = "".join(self.parts)
+        suffix = "\n" if single else "\n\n"
+        if current and not current.endswith(suffix):
+            self.parts.append(suffix)
+
+    def markdown(self) -> str:
+        text = "".join(self.parts)
+        text = re.sub(r"[ \t]+\n", "\n", text)
+        text = re.sub(r"\n{3,}", "\n\n", text)
+        return text.strip()
+
+
+def convert_html_to_markdown(html: str) -> str:
+    """Convert exported Coda HTML to simple Markdown while preserving images."""
+    parser = _HtmlToMarkdownParser()
+    parser.feed(html)
+    return parser.markdown()
+
+
 def is_gif(url: str, content_type: str = "") -> bool:
     """True if url or content_type indicates a GIF."""
     if content_type:
@@ -118,6 +188,20 @@ def rewrite_asset_urls(markdown: str, url_map: dict[str, str]) -> str:
     """Replace each key URL with its value URL throughout the markdown body."""
     for old_url, new_url in url_map.items():
         markdown = markdown.replace(old_url, new_url)
+    return markdown
+
+
+def rewrite_coda_page_links(markdown: str, url_map: dict[str, str]) -> str:
+    """Replace known Coda page URLs/IDs in Markdown with Linear document URLs."""
+    for old_url, linear_url in sorted(url_map.items(), key=lambda item: len(item[0]), reverse=True):
+        if old_url.startswith(("http://", "https://")):
+            markdown = markdown.replace(old_url, linear_url)
+        else:
+            markdown = re.sub(
+                rf"https://[^\s)>\]]*{re.escape(old_url)}[^\s)>\]]*",
+                linear_url,
+                markdown,
+            )
     return markdown
 
 
