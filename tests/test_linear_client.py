@@ -76,6 +76,27 @@ def test_put_asset_uses_exact_presigned_headers(monkeypatch):
     ]
 
 
+def test_put_asset_adds_content_type_when_signed_url_requires_it(monkeypatch):
+    put_calls = []
+
+    def fake_put(url, **kwargs):
+        put_calls.append({"url": url, **kwargs})
+        request = httpx.Request("PUT", url)
+        return httpx.Response(200, request=request)
+
+    monkeypatch.setattr("coda2linear.linear_client.httpx.put", fake_put)
+    linear = LinearClient("token")
+
+    linear.put_asset(
+        "https://uploads.linear.app/file",
+        [{"key": "x-goog-content-length-range", "value": "0,100"}],
+        b"image-bytes",
+        "image/gif",
+    )
+
+    assert put_calls[0]["headers"]["content-type"] == "image/gif"
+
+
 def test_document_update_sends_content_update():
     http = RecordingHttp(
         [

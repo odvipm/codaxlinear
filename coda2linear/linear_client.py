@@ -101,15 +101,27 @@ class LinearClient:
             raise RuntimeError(f"fileUpload mutation failed: {result}")
         return result["uploadFile"]
 
-    def put_asset(self, upload_url: str, headers: list[dict], data: bytes) -> None:
+    def put_asset(
+        self,
+        upload_url: str,
+        headers: list[dict],
+        data: bytes,
+        content_type: str | None = None,
+    ) -> None:
         """PUT asset bytes to the presigned upload URL."""
         hdict = {h["key"]: h["value"] for h in headers}
+        if content_type and not any(key.lower() == "content-type" for key in hdict):
+            hdict["content-type"] = content_type
         hdict["Content-Length"] = str(len(data))
         r = httpx.put(upload_url, content=data, headers=hdict, timeout=60)
-        if r.status_code == 400 and "x-goog-content-length-range" in hdict:
-            retry_headers = dict(hdict)
-            retry_headers.pop("x-goog-content-length-range", None)
-            retry_headers.pop("X-Goog-Content-Length-Range", None)
+        if r.status_code == 400 and any(
+            key.lower() == "x-goog-content-length-range" for key in hdict
+        ):
+            retry_headers = {
+                key: value
+                for key, value in hdict.items()
+                if key.lower() != "x-goog-content-length-range"
+            }
             r = httpx.put(upload_url, content=data, headers=retry_headers, timeout=60)
         try:
             r.raise_for_status()

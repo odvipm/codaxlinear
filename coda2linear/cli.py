@@ -146,7 +146,12 @@ def _upload_asset(
         return _DRY_RUN_URL, True
 
     upload_info = linear.file_upload(content_type, filename, size)
-    linear.put_asset(upload_info["uploadUrl"], upload_info["headers"], asset_bytes)
+    linear.put_asset(
+        upload_info["uploadUrl"],
+        upload_info["headers"],
+        asset_bytes,
+        content_type,
+    )
     new_url = upload_info["assetUrl"]
     state["uploaded_assets"][url] = new_url
     return new_url, True
