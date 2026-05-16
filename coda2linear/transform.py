@@ -231,6 +231,76 @@ def convert_html_to_markdown(html: str) -> str:
     return parser.markdown()
 
 
+_TABLE_SEPARATOR_RE = re.compile(r"^\|[ \t:|-]+\|[ \t]*$")
+
+
+def _is_table_separator(line: str) -> bool:
+    return bool(_TABLE_SEPARATOR_RE.match(line.strip()))
+
+
+def _looks_like_table_header(line: str) -> bool:
+    stripped = line.strip()
+    return stripped.startswith("|") and stripped.endswith("|") and stripped.count("|") >= 2
+
+
+def _split_glued_table_header(line: str, next_line: str) -> tuple[str, str] | None:
+    if _looks_like_table_header(line) or not _is_table_separator(next_line):
+        return None
+    marker = line.find("|")
+    if marker <= 0:
+        return None
+    prefix = line[:marker].rstrip()
+    header = line[marker:].strip()
+    if not prefix or not _looks_like_table_header(header):
+        return None
+    return prefix, header
+
+
+def normalize_markdown_for_linear(markdown: str) -> str:
+    """Clean Markdown edge cases that prevent Linear from rendering blocks."""
+    raw_lines = markdown.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    expanded: list[str] = []
+    i = 0
+    while i < len(raw_lines):
+        line = raw_lines[i].rstrip()
+        next_line = raw_lines[i + 1].rstrip() if i + 1 < len(raw_lines) else ""
+        split = _split_glued_table_header(line, next_line)
+        if split:
+            prefix, header = split
+            expanded.append(prefix)
+            expanded.append("")
+            expanded.append(header)
+        else:
+            expanded.append(line)
+        i += 1
+
+    normalized: list[str] = []
+    for i, line in enumerate(expanded):
+        prev_line = normalized[-1] if normalized else ""
+        next_line = expanded[i + 1] if i + 1 < len(expanded) else ""
+        starts_table = _looks_like_table_header(line) and _is_table_separator(next_line)
+
+        if starts_table and normalized and prev_line.strip():
+            normalized.append("")
+        normalized.append(line)
+
+        ends_table = (
+            line.strip().startswith("|")
+            and line.strip().endswith("|")
+            and (
+                i + 1 == len(expanded)
+                or not expanded[i + 1].strip().startswith("|")
+            )
+        )
+        if ends_table and i + 1 < len(expanded) and expanded[i + 1].strip():
+            normalized.append("")
+
+    text = "\n".join(normalized)
+    text = re.sub(r"[ \t]+\n", "\n", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
 def is_gif(url: str, content_type: str = "") -> bool:
     """True if url or content_type indicates a GIF."""
     if content_type:

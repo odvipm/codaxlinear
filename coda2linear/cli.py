@@ -20,6 +20,7 @@ from .transform import (
     external_gif_fallback_callout,
     is_external_gif_url,
     is_gif,
+    normalize_markdown_for_linear,
     oversized_asset_callout,
     rewrite_asset_urls,
     rewrite_coda_page_links,
@@ -250,8 +251,8 @@ def _migrate_one_page(
             url_map[url] = new_url
             images_migrated += 1
 
-    # rewrite Markdown and append callouts
-    final_markdown = rewrite_asset_urls(markdown, url_map)
+    # rewrite Markdown and normalize block spacing before creating the document
+    final_markdown = normalize_markdown_for_linear(rewrite_asset_urls(markdown, url_map))
     for callout in callout_lines:
         final_markdown += callout
 

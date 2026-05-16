@@ -9,6 +9,7 @@ from coda2linear.transform import (
     should_rehost,
     rewrite_asset_urls,
     rewrite_coda_page_links,
+    normalize_markdown_for_linear,
     build_title,
     oversized_asset_callout,
     external_gif_fallback_callout,
@@ -75,6 +76,36 @@ def test_convert_html_to_markdown_preserves_table_structure():
         "| Blocked \\| urgent | Team B |\n\n"
         "After table"
     )
+
+
+def test_normalize_markdown_for_linear_separates_table_from_previous_text():
+    md = (
+        "List or Department Receivers| Full Name | Email |\n"
+        "|---|---|\n"
+        "| Rosario Ogao | rogao@pcni.com.ph |\n"
+        "\n"
+        "Issue Handling"
+    )
+
+    assert normalize_markdown_for_linear(md) == (
+        "List or Department Receivers\n\n"
+        "| Full Name | Email |\n"
+        "|---|---|\n"
+        "| Rosario Ogao | rogao@pcni.com.ph |\n\n"
+        "Issue Handling"
+    )
+
+
+def test_normalize_markdown_for_linear_keeps_existing_table_spacing():
+    md = (
+        "Before\n\n"
+        "| Full Name | Email |\n"
+        "|---|---|\n"
+        "| Rosario Ogao | rogao@pcni.com.ph |\n\n"
+        "After"
+    )
+
+    assert normalize_markdown_for_linear(md) == md
 
 
 def test_extract_reference_style_image():
