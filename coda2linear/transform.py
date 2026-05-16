@@ -113,6 +113,10 @@ class _HtmlToMarkdownParser(HTMLParser):
             self._append("#" * int(tag[1]) + " ")
         elif tag == "br":
             self._append("\n")
+        elif tag in {"strong", "b"}:
+            self._append("**")
+        elif tag in {"em", "i"}:
+            self._append("*")
         elif tag in {"ol", "ul"}:
             if not self.list_stack:
                 self._break()
@@ -142,6 +146,10 @@ class _HtmlToMarkdownParser(HTMLParser):
             if tag in {"ul", "ol"} and self.list_stack:
                 self.list_stack.pop()
             self._break(single=bool(self.list_stack))
+        elif tag in {"strong", "b"}:
+            self._append("**")
+        elif tag in {"em", "i"}:
+            self._append("*")
         elif tag == "li":
             self._break(single=True)
         elif tag == "a" and self.link_stack:
@@ -189,6 +197,10 @@ class _HtmlToMarkdownParser(HTMLParser):
             self.current_cell_parts = []
         elif tag == "br":
             self._append("<br>")
+        elif tag in {"strong", "b"}:
+            self._append("**")
+        elif tag in {"em", "i"}:
+            self._append("*")
         elif tag == "a":
             href = attr.get("href")
             self.link_stack.append(href)
@@ -206,6 +218,10 @@ class _HtmlToMarkdownParser(HTMLParser):
             href = self.link_stack.pop()
             if href:
                 self._append(f"]({href})")
+        elif tag in {"strong", "b"}:
+            self._append("**")
+        elif tag in {"em", "i"}:
+            self._append("*")
         elif tag in {"td", "th"} and self.current_cell_parts is not None:
             if self.current_row is not None:
                 self.current_row.append(self._clean_cell("".join(self.current_cell_parts)))

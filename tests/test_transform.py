@@ -54,6 +54,18 @@ def test_convert_html_to_markdown_preserves_image_position():
     )
 
 
+def test_convert_html_to_markdown_preserves_inline_emphasis():
+    html = """
+    <p>Use <strong>strong text</strong>, <em>italic text</em>, and <strong><em>both</em></strong>.</p>
+    <p>Also <b>bold</b> and <i>italic</i>.</p>
+    """
+
+    assert convert_html_to_markdown(html) == (
+        "Use **strong text**, *italic text*, and ***both***.\n\n"
+        "Also **bold** and *italic*."
+    )
+
+
 def test_convert_html_to_markdown_preserves_table_structure():
     html = """
     <p>Before table</p>
