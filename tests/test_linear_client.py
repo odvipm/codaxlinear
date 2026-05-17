@@ -124,6 +124,29 @@ def test_document_update_sends_content_update():
     assert payload["variables"] == {"id": "doc-1", "content": "New content"}
 
 
+def test_document_delete_sends_delete_mutation():
+    http = RecordingHttp(
+        [
+            (
+                200,
+                {
+                    "data": {
+                        "documentDelete": {
+                            "success": True,
+                        }
+                    }
+                },
+            ),
+        ]
+    )
+    linear = LinearClient("token", http)
+
+    assert linear.document_delete("doc-1") is True
+    payload = http.calls[0]["json"]
+    assert "documentDelete" in payload["query"]
+    assert payload["variables"] == {"id": "doc-1"}
+
+
 def test_put_asset_retries_without_content_length_range_on_400(monkeypatch):
     put_calls = []
 

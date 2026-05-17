@@ -43,6 +43,30 @@ ASSET_EXTENSIONS = frozenset({
     ".xlsx",
     ".zip",
 })
+IMAGE_CONTENT_TYPES = frozenset({
+    "image/apng",
+    "image/avif",
+    "image/bmp",
+    "image/gif",
+    "image/heic",
+    "image/jpeg",
+    "image/jpg",
+    "image/png",
+    "image/svg+xml",
+    "image/webp",
+})
+IMAGE_EXTENSIONS = frozenset({
+    ".apng",
+    ".avif",
+    ".bmp",
+    ".gif",
+    ".heic",
+    ".jpeg",
+    ".jpg",
+    ".png",
+    ".svg",
+    ".webp",
+})
 
 
 def extract_asset_urls(markdown: str) -> list[str]:
@@ -536,9 +560,46 @@ def should_rehost(url: str, content_type: str = "") -> bool:
     )
 
 
+def is_image_asset(url: str, content_type: str = "") -> bool:
+    """True if an asset should remain embedded as an image in Markdown."""
+    normalized_type = content_type.lower().split(";")[0].strip()
+    if normalized_type in IMAGE_CONTENT_TYPES:
+        return True
+    path = urlparse(url).path.lower()
+    return any(path.endswith(ext) for ext in IMAGE_EXTENSIONS)
+
+
 def rewrite_asset_urls(markdown: str, url_map: dict[str, str]) -> str:
     """Replace each key URL with its value URL throughout the markdown body."""
     for old_url, new_url in url_map.items():
+        markdown = markdown.replace(old_url, new_url)
+    return markdown
+
+
+def rewrite_asset_references(
+    markdown: str,
+    url_map: dict[str, str],
+    linked_asset_urls: set[str] | None = None,
+    labels: dict[str, str] | None = None,
+) -> str:
+    """Rewrite uploaded asset URLs, converting non-images from embeds to links."""
+    linked_asset_urls = linked_asset_urls or set()
+    labels = labels or {}
+
+    for old_url, new_url in url_map.items():
+        if old_url in linked_asset_urls:
+            fallback_label = labels.get(old_url) or urlparse(new_url).path.rsplit("/", 1)[-1] or "Attachment"
+            markdown = re.sub(
+                rf"!\[([^\]]*)\]\({re.escape(old_url)}\)",
+                lambda match: f"[{match.group(1) or fallback_label}]({new_url})",
+                markdown,
+            )
+            markdown = re.sub(
+                rf'<img[^>]+src=["\']{re.escape(old_url)}["\'][^>]*>',
+                f"[{fallback_label}]({new_url})",
+                markdown,
+                flags=re.IGNORECASE,
+            )
         markdown = markdown.replace(old_url, new_url)
     return markdown
 

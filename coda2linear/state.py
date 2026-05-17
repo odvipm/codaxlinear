@@ -31,6 +31,7 @@ def load_state(path: str) -> dict:
         ) from exc
     state.setdefault("pages", {})
     state.setdefault("uploaded_assets", {})
+    state.setdefault("uploaded_asset_metadata", {})
     return state
 
 

@@ -20,9 +20,10 @@ from .transform import (
     external_gif_fallback_callout,
     is_external_gif_url,
     is_gif,
+    is_image_asset,
     normalize_markdown_for_linear,
     oversized_asset_callout,
-    rewrite_asset_urls,
+    rewrite_asset_references,
     rewrite_coda_page_links,
     should_rehost,
 )
@@ -188,6 +189,8 @@ def _migrate_one_page(
             urls = extract_asset_urls(markdown)
 
     url_map: dict[str, str] = {}
+    linked_asset_urls: set[str] = set()
+    asset_labels: dict[str, str] = {}
     callout_lines: list[str] = []
     images_migrated = 0
     images_skipped = 0
@@ -198,7 +201,36 @@ def _migrate_one_page(
 
         # use cached result if available
         if url in state["uploaded_assets"]:
-            url_map[url] = state["uploaded_assets"][url]
+            cached_url = url
+            url_map[cached_url] = state["uploaded_assets"][cached_url]
+            metadata = state.setdefault("uploaded_asset_metadata", {}).get(cached_url, {})
+            content_type = metadata.get("content_type", "")
+            filename = metadata.get("filename", "")
+            if not content_type:
+                for attempt in range(2):
+                    try:
+                        _, content_type, filename = coda.download_asset(url)
+                        state["uploaded_asset_metadata"][cached_url] = {
+                            "content_type": content_type,
+                            "filename": filename,
+                        }
+                        break
+                    except PermissionError:
+                        if attempt == 0:
+                            log.info("Signed URL expired; re-fetching page Markdown for %s", page_id)
+                            markdown = coda.get_page_content_markdown(doc_id, page_id)
+                            old_path = urlparse(url).path
+                            fresh = next(
+                                (u for u in extract_asset_urls(markdown) if urlparse(u).path == old_path),
+                                None,
+                            )
+                            if fresh:
+                                url = fresh
+                        else:
+                            raise
+            if not is_image_asset(url, content_type):
+                linked_asset_urls.add(cached_url)
+                asset_labels[cached_url] = filename or "Attachment"
             images_migrated += 1
             continue
 
@@ -249,10 +281,19 @@ def _migrate_one_page(
             images_migrated += 1
         else:
             url_map[url] = new_url
+            state.setdefault("uploaded_asset_metadata", {})[url] = {
+                "content_type": content_type,
+                "filename": filename,
+            }
+            if not is_image_asset(url, content_type):
+                linked_asset_urls.add(url)
+                asset_labels[url] = filename or "Attachment"
             images_migrated += 1
 
     # rewrite Markdown and normalize block spacing before creating the document
-    final_markdown = normalize_markdown_for_linear(rewrite_asset_urls(markdown, url_map))
+    final_markdown = normalize_markdown_for_linear(
+        rewrite_asset_references(markdown, url_map, linked_asset_urls, asset_labels)
+    )
     for callout in callout_lines:
         final_markdown += callout
 
@@ -464,6 +505,104 @@ def cmd_verify(args: argparse.Namespace) -> None:
         print(f"\nVERIFY PASSED: all {len(rows)} document(s) confirmed.")
 
 
+def _cleanup_rows_from_report(path: str) -> list[dict]:
+    if not os.path.exists(path):
+        return []
+    with open(path, newline="", encoding="utf-8") as f:
+        return [row for row in csv.DictReader(f) if row.get("status") == "success"]
+
+
+def _cleanup_rows_from_state(path: str) -> list[dict]:
+    if not os.path.exists(path):
+        return []
+    state = load_state(path)
+    rows: list[dict] = []
+    for page_id, page_state in state.get("pages", {}).items():
+        if page_state.get("status") != "success" or not page_state.get("linear_document_id"):
+            continue
+        rows.append({
+            "coda_page_id": page_id,
+            "coda_page_name": page_id,
+            "linear_document_id": page_state["linear_document_id"],
+            "linear_document_url": page_state.get("linear_document_url", ""),
+        })
+    return rows
+
+
+def _filter_cleanup_rows(rows: list[dict], keep_latest_per_page: bool) -> list[dict]:
+    seen_doc_ids: set[str] = set()
+    deduped: list[dict] = []
+    for row in rows:
+        doc_id = row.get("linear_document_id")
+        if not doc_id or doc_id in seen_doc_ids:
+            continue
+        seen_doc_ids.add(doc_id)
+        deduped.append(row)
+
+    if not keep_latest_per_page:
+        return deduped
+
+    latest_doc_by_page: dict[str, str] = {}
+    for row in deduped:
+        page_id = row.get("coda_page_id") or row.get("linear_document_id", "")
+        latest_doc_by_page[page_id] = row["linear_document_id"]
+
+    return [
+        row for row in deduped
+        if latest_doc_by_page.get(row.get("coda_page_id") or row["linear_document_id"])
+        != row["linear_document_id"]
+    ]
+
+
+def cmd_cleanup(args: argparse.Namespace) -> None:
+    linear_token = os.environ.get("LINEAR_API_TOKEN")
+    if not linear_token:
+        sys.exit("Error: LINEAR_API_TOKEN not set")
+
+    rows = _cleanup_rows_from_report(args.report)
+    source = args.report
+    if not rows:
+        rows = _cleanup_rows_from_state(args.state_file)
+        source = args.state_file
+
+    rows = _filter_cleanup_rows(rows, args.keep_latest_per_page)
+    if not rows:
+        print(f"No migrated Linear documents found to clean up in {source}.")
+        return
+
+    action = "Would trash" if not args.yes else "Trashing"
+    print(f"{action} {len(rows)} Linear document(s) from {source}:")
+    for row in rows:
+        name = row.get("coda_page_name") or row.get("coda_page_id") or row["linear_document_id"]
+        print(f"  - {name}: {row['linear_document_id']}")
+
+    if not args.yes:
+        print("\nDRY RUN only. Re-run with --yes to actually trash these documents.")
+        return
+
+    with httpx.Client(
+        headers={
+            "Authorization": linear_token,
+            "Content-Type": "application/json",
+        },
+        timeout=60,
+    ) as linear_http:
+        linear = LinearClient(linear_token, linear_http)
+        deleted = 0
+        failed = 0
+        for row in rows:
+            try:
+                if linear.document_delete(row["linear_document_id"]):
+                    deleted += 1
+            except Exception as exc:
+                failed += 1
+                log.error("Failed to trash Linear document %s: %s", row["linear_document_id"], exc)
+
+    print(f"\nDone. {deleted} trashed, {failed} failed.")
+    if failed:
+        sys.exit(1)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="coda2linear",
@@ -500,6 +639,20 @@ def main() -> None:
     verify_p = sub.add_parser("verify", help="Confirm migrated documents exist in Linear")
     verify_p.add_argument("--report", default="report.csv")
 
+    cleanup_p = sub.add_parser("cleanup", help="Trash migrated Linear documents from report/state")
+    cleanup_p.add_argument("--report", default="report.csv")
+    cleanup_p.add_argument("--state-file", default="state.json")
+    cleanup_p.add_argument(
+        "--keep-latest-per-page",
+        action="store_true",
+        help="Keep the newest successful document for each Coda page and trash older duplicates",
+    )
+    cleanup_p.add_argument(
+        "--yes",
+        action="store_true",
+        help="Actually trash documents. Without this flag cleanup only prints what it would do.",
+    )
+
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -514,3 +667,5 @@ def main() -> None:
         cmd_migrate(args)
     elif args.command == "verify":
         cmd_verify(args)
+    elif args.command == "cleanup":
+        cmd_cleanup(args)

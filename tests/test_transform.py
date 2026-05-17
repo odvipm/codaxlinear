@@ -8,12 +8,14 @@ from coda2linear.transform import (
     is_external_gif_url,
     should_rehost,
     rewrite_asset_urls,
+    rewrite_asset_references,
     rewrite_coda_page_links,
     normalize_markdown_for_linear,
     build_title,
     oversized_asset_callout,
     external_gif_fallback_callout,
     count_table_dimensions,
+    is_image_asset,
 )
 
 
@@ -387,6 +389,14 @@ def test_should_not_rehost_regular_link():
     assert should_rehost("https://example.com/page") is False
 
 
+def test_is_image_asset_false_for_pdf_content_type():
+    assert is_image_asset("https://codahosted.io/file.pdf", "application/pdf") is False
+
+
+def test_is_image_asset_true_for_png_content_type():
+    assert is_image_asset("https://codahosted.io/file", "image/png") is True
+
+
 def test_rewrite_inline_image_url():
     md = "![alt](https://codahosted.io/img.png)"
     result = rewrite_asset_urls(md, {"https://codahosted.io/img.png": "https://linear.app/assets/img.png"})
@@ -403,6 +413,26 @@ def test_rewrite_multiple_urls():
     assert "https://linear.app/a.png" in result
     assert "https://linear.app/b.png" in result
     assert "codahosted.io" not in result
+
+
+def test_rewrite_asset_references_converts_pdf_image_embed_to_link():
+    md = "See ![Attachment](https://codahosted.io/file.pdf)"
+    result = rewrite_asset_references(
+        md,
+        {"https://codahosted.io/file.pdf": "https://linear.app/assets/file.pdf"},
+        {"https://codahosted.io/file.pdf"},
+        {"https://codahosted.io/file.pdf": "file.pdf"},
+    )
+    assert result == "See [Attachment](https://linear.app/assets/file.pdf)"
+
+
+def test_rewrite_asset_references_keeps_image_embed_for_images():
+    md = "See ![Screenshot](https://codahosted.io/file.png)"
+    result = rewrite_asset_references(
+        md,
+        {"https://codahosted.io/file.png": "https://linear.app/assets/file.png"},
+    )
+    assert result == "See ![Screenshot](https://linear.app/assets/file.png)"
 
 
 def test_rewrite_empty_map_returns_unchanged():

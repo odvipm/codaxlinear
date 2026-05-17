@@ -175,6 +175,18 @@ class LinearClient:
             raise RuntimeError(f"documentUpdate mutation failed: {result}")
         return result["document"]
 
+    def document_delete(self, doc_id: str) -> bool:
+        """Trash/archive a document. Returns True on success."""
+        query = """
+        mutation DocumentDelete($id: String!) {
+          documentDelete(id: $id) {
+            success
+          }
+        }
+        """
+        data = self._gql(query, {"id": doc_id})
+        return bool(data["documentDelete"].get("success"))
+
     def get_document(self, doc_id: str) -> dict | None:
         """Fetch a document by ID. Returns {id, content} or None if not found."""
         query = """
