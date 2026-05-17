@@ -227,15 +227,54 @@ def test_normalize_markdown_for_linear_indents_bullets_nested_in_numbered_list()
         "1. ATM\n"
         "2. Document\n"
         "3. Confidential Document\n"
-        "   * Receipts, Anything that is related to cash/money, Collections, Loan Docs, Demand Letters\n"
+        "    * Receipts, Anything that is related to cash/money, Collections, Loan Docs, Demand Letters\n"
         "4. Computer Parts/Accessories\n"
-        "   * Mouse, Keyboard, Webcam, Monitor, CPU, etc\n"
+        "    * Mouse, Keyboard, Webcam, Monitor, CPU, etc\n"
         "5. Computer Set\n"
         "6. CCTV Assets\n"
         "7. Mobile Device\n"
         "8. Mobile Device Accessories\n"
-        "   * Charger, Headset, Batteries, etc\n"
+        "    * Charger, Headset, Batteries, etc\n"
         "9. Printer"
+    )
+
+
+def test_normalize_markdown_for_linear_removes_empty_number_before_nested_bullet():
+    md = (
+        "Type of Items\n\n"
+        "1. ATM\n"
+        "2. Document\n"
+        "3. Confidential Document\n"
+        " * Receipts, Anything that is related to cash/money, Collections, Loan Docs, Demand Letters\n"
+        "4. Computer Parts/Accessories\n"
+        " * Mouse, Keyboard, Webcam, Monitor, CPU, etc\n"
+        "5. Computer Set\n"
+        "6. CCTV Assets\n"
+        "7. Mobile Device\n"
+        "8. Mobile Device Accessories\n"
+        "9.\n"
+        "* Charger, Headset, Batteries, etc\n"
+        "12. Printer\n"
+        "13. Printer Ink\n"
+        "14. Car Accessories"
+    )
+
+    assert normalize_markdown_for_linear(md) == (
+        "Type of Items\n\n"
+        "1. ATM\n"
+        "2. Document\n"
+        "3. Confidential Document\n"
+        "    * Receipts, Anything that is related to cash/money, Collections, Loan Docs, Demand Letters\n"
+        "4. Computer Parts/Accessories\n"
+        "    * Mouse, Keyboard, Webcam, Monitor, CPU, etc\n"
+        "5. Computer Set\n"
+        "6. CCTV Assets\n"
+        "7. Mobile Device\n"
+        "8. Mobile Device Accessories\n"
+        "    * Charger, Headset, Batteries, etc\n"
+        "9. Printer\n"
+        "10. Printer Ink\n"
+        "11. Car Accessories"
     )
 
 

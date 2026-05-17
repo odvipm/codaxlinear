@@ -337,7 +337,7 @@ def convert_html_to_markdown(html: str) -> str:
 
 _TABLE_SEPARATOR_RE = re.compile(r"^\|[ \t:|-]+\|[ \t]*$")
 _TOP_LEVEL_BULLET_RE = re.compile(r"^[-*]\s+(.+?)\s*$")
-_ORDERED_LIST_RE = re.compile(r"^\d+\.\s+")
+_ORDERED_LIST_RE = re.compile(r"^(\d+)\.\s*(.*)$")
 _LOOSE_NESTED_BULLET_RE = re.compile(r"^( {1,2})([-*])\s+(.+)$")
 
 
@@ -415,17 +415,45 @@ def _restore_numbered_parent_bullets(lines: list[str]) -> list[str]:
 def _normalize_nested_bullets_in_ordered_lists(lines: list[str]) -> list[str]:
     normalized: list[str] = []
     previous_ordered_item = False
-    for line in lines:
+    in_ordered_block = False
+    next_number = 1
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        ordered_item = _ORDERED_LIST_RE.match(line)
+        top_level_bullet = _TOP_LEVEL_BULLET_RE.match(line)
         nested_bullet = _LOOSE_NESTED_BULLET_RE.match(line)
+
+        if ordered_item:
+            text = ordered_item.group(2).strip()
+            next_line = lines[i + 1] if i + 1 < len(lines) else ""
+            if not text and _TOP_LEVEL_BULLET_RE.match(next_line):
+                previous_ordered_item = True
+                in_ordered_block = True
+                i += 1
+                continue
+
+            if not in_ordered_block:
+                next_number = int(ordered_item.group(1))
+            line = f"{next_number}. {text}"
+            next_number += 1
+            previous_ordered_item = True
+            in_ordered_block = True
+            normalized.append(line)
+            i += 1
+            continue
+
+        if previous_ordered_item and top_level_bullet:
+            line = f"    {top_level_bullet.group(0)}"
         if previous_ordered_item and nested_bullet:
-            line = f"   {nested_bullet.group(2)} {nested_bullet.group(3)}"
+            line = f"    {nested_bullet.group(2)} {nested_bullet.group(3)}"
 
         normalized.append(line)
 
-        if _ORDERED_LIST_RE.match(line):
-            previous_ordered_item = True
-        elif line.strip() and not line.startswith(" "):
+        if line.strip() and not line.startswith(" "):
             previous_ordered_item = False
+            in_ordered_block = False
+        i += 1
 
     return normalized
 
