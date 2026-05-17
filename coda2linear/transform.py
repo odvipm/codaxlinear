@@ -337,6 +337,8 @@ def convert_html_to_markdown(html: str) -> str:
 
 _TABLE_SEPARATOR_RE = re.compile(r"^\|[ \t:|-]+\|[ \t]*$")
 _TOP_LEVEL_BULLET_RE = re.compile(r"^[-*]\s+(.+?)\s*$")
+_ORDERED_LIST_RE = re.compile(r"^\d+\.\s+")
+_LOOSE_NESTED_BULLET_RE = re.compile(r"^( {1,2})([-*])\s+(.+)$")
 
 
 def _is_table_separator(line: str) -> bool:
@@ -410,6 +412,24 @@ def _restore_numbered_parent_bullets(lines: list[str]) -> list[str]:
     return restored
 
 
+def _normalize_nested_bullets_in_ordered_lists(lines: list[str]) -> list[str]:
+    normalized: list[str] = []
+    previous_ordered_item = False
+    for line in lines:
+        nested_bullet = _LOOSE_NESTED_BULLET_RE.match(line)
+        if previous_ordered_item and nested_bullet:
+            line = f"   {nested_bullet.group(2)} {nested_bullet.group(3)}"
+
+        normalized.append(line)
+
+        if _ORDERED_LIST_RE.match(line):
+            previous_ordered_item = True
+        elif line.strip() and not line.startswith(" "):
+            previous_ordered_item = False
+
+    return normalized
+
+
 def normalize_markdown_for_linear(markdown: str) -> str:
     """Clean Markdown edge cases that prevent Linear from rendering blocks."""
     raw_lines = markdown.replace("\r\n", "\n").replace("\r", "\n").split("\n")
@@ -450,6 +470,7 @@ def normalize_markdown_for_linear(markdown: str) -> str:
             normalized.append("")
 
     normalized = _restore_numbered_parent_bullets(normalized)
+    normalized = _normalize_nested_bullets_in_ordered_lists(normalized)
 
     text = "\n".join(normalized)
     text = re.sub(r"[ \t]+\n", "\n", text)

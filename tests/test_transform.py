@@ -205,6 +205,40 @@ def test_normalize_markdown_for_linear_restores_numbered_parent_bullets():
     )
 
 
+def test_normalize_markdown_for_linear_indents_bullets_nested_in_numbered_list():
+    md = (
+        "Type of Items\n\n"
+        "1. ATM\n"
+        "2. Document\n"
+        "3. Confidential Document\n"
+        "  * Receipts, Anything that is related to cash/money, Collections, Loan Docs, Demand Letters\n"
+        "4. Computer Parts/Accessories\n"
+        "  * Mouse, Keyboard, Webcam, Monitor, CPU, etc\n"
+        "5. Computer Set\n"
+        "6. CCTV Assets\n"
+        "7. Mobile Device\n"
+        "8. Mobile Device Accessories\n"
+        "  * Charger, Headset, Batteries, etc\n"
+        "9. Printer"
+    )
+
+    assert normalize_markdown_for_linear(md) == (
+        "Type of Items\n\n"
+        "1. ATM\n"
+        "2. Document\n"
+        "3. Confidential Document\n"
+        "   * Receipts, Anything that is related to cash/money, Collections, Loan Docs, Demand Letters\n"
+        "4. Computer Parts/Accessories\n"
+        "   * Mouse, Keyboard, Webcam, Monitor, CPU, etc\n"
+        "5. Computer Set\n"
+        "6. CCTV Assets\n"
+        "7. Mobile Device\n"
+        "8. Mobile Device Accessories\n"
+        "   * Charger, Headset, Batteries, etc\n"
+        "9. Printer"
+    )
+
+
 def test_extract_reference_style_image():
     md = "![alt text][ref1]\n\n[ref1]: https://codahosted.io/docs/abc/blobs/img.png"
     assert extract_asset_urls(md) == ["https://codahosted.io/docs/abc/blobs/img.png"]
